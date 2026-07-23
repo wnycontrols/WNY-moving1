@@ -322,6 +322,20 @@
     padding: 6px 12px; border: 1px solid var(--border-strong); min-width: 96px; text-align: center;
   }
 
+  /* Three-option chooser for regular accounts */
+  .choice { display: grid; grid-template-columns: 1fr; gap: 10px; margin-top: 14px; }
+  .choice button {
+    min-height: 54px; font-size: 15px; font-weight: 700; letter-spacing: 0.5px;
+    border: 1px solid var(--border-strong); color: var(--text-dim); background: var(--panel-2);
+    display: flex; align-items: center; justify-content: center; gap: 10px;
+  }
+  .choice button:hover { color: var(--text); background: var(--panel-2); }
+  .choice button .tick { font-size: 13px; }
+  .choice-clear {
+    margin-top: 12px; text-align: center; font-size: 13px; color: var(--text-faint);
+    text-decoration: underline; cursor: pointer; padding: 8px;
+  }
+
   .modal {
     position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
     width: calc(100% - 32px); max-width: 440px;
@@ -527,7 +541,9 @@
     }
     const adminExtra = isAdmin ? ' ⏸ on a chip hides someone who isn’t currently working (their data is kept); reopen them from the “Inactive” section.' : '';
     $('hintDesktop').textContent = 'Click your chip, then click days to cycle: Available → Partial → Unavailable → clear. Click a name badge to cycle it directly. Click your initials circle to change your color.' + adminExtra;
-    $('hintMobile').textContent = 'Tap any day to open it, then tap your name to cycle: Available → Partial → Unavailable → clear.' + adminExtra;
+    $('hintMobile').textContent = isAdmin
+      ? 'Tap any day to open it, then tap a name to cycle their status.' + adminExtra
+      : 'Tap any day and pick Available, Partial, or Unavailable.';
   }
 
   // ── Config check ──
@@ -737,16 +753,19 @@
   }
 
   // ── Writes ──
-  function cycleMark(date, uid) {
+  function setMark(date, uid, state) {
     if (!canEdit(uid)) { toast('You can only change your own days.'); return; }
+    const ref = db.collection('availability').doc(uid + '_' + date);
+    const op = state === null ? ref.delete() : ref.set({ uid: uid, date: date, state: state });
+    op.catch(function () { toast('Change not saved — you may not have permission.'); });
+  }
+
+  function cycleMark(date, uid) {
     const current = (marks[date] || {})[uid];
     const idx = STATES.indexOf(current);
-    const ref = db.collection('availability').doc(uid + '_' + date);
-    let op;
-    if (idx === -1) op = ref.set({ uid: uid, date: date, state: 'avail' });
-    else if (idx === STATES.length - 1) op = ref.delete();
-    else op = ref.set({ uid: uid, date: date, state: STATES[idx + 1] });
-    op.catch(function () { toast('Change not saved — you may not have permission.'); });
+    if (idx === -1) setMark(date, uid, 'avail');
+    else if (idx === STATES.length - 1) setMark(date, uid, null);
+    else setMark(date, uid, STATES[idx + 1]);
   }
 
   function setColor(emp, color) {
@@ -867,16 +886,20 @@
     const parts = date.split('-');
     const d = new Date(+parts[0], +parts[1] - 1, +parts[2]);
     $('sheetTitle').textContent = DOW[d.getDay()] + ', ' + MONTHS[d.getMonth()] + ' ' + d.getDate();
-    const mineOnly = effectiveViewMode() === 'mine';
-    $('sheetSub').textContent = mineOnly
-      ? 'Tap to change your status. Switch to “Everyone” to see the team.'
-      : (isAdmin ? 'Tap anyone to change their status.' : 'Tap your name to change your status.');
     const wrap = $('sheetRows');
     wrap.innerHTML = '';
     const dayMarks = marks[date] || {};
-    const sheetEmps = mineOnly
-      ? activeEmployees().filter(e => e.id === me.uid)
-      : activeEmployees();
+    const allActive = activeEmployees();
+    // Regular accounts update only themselves here; admins manage everyone.
+    const sheetEmps = isAdmin ? allActive : allActive.filter(e => e.id === me.uid);
+    if (isAdmin) {
+      $('sheetSub').textContent = 'Tap anyone to change their status.';
+    } else {
+      const n = { avail: 0, partial: 0, unavail: 0 };
+      allActive.forEach(function (e) { if (dayMarks[e.id]) n[dayMarks[e.id]]++; });
+      $('sheetSub').textContent = 'Pick your status for this day. Team: '
+        + n.avail + ' available · ' + n.partial + ' partial · ' + n.unavail + ' out.';
+    }
     sheetEmps.forEach(function (emp) {
       const row = document.createElement('div');
       const editable = canEdit(emp.id);
@@ -913,9 +936,55 @@
       }
       row.appendChild(pill);
 
-      if (editable) row.addEventListener('click', function () { cycleMark(date, emp.id); });
+      if (editable && isAdmin) row.addEventListener('click', function () { cycleMark(date, emp.id); });
       wrap.appendChild(row);
     });
+
+    // Regular accounts: pick from the three options directly
+    if (!isAdmin && sheetEmps.length === 1) {
+      const my = sheetEmps[0];
+      const current = dayMarks[my.id];
+      const col = empColor(my);
+      const choice = document.createElement('div');
+      choice.className = 'choice';
+      STATES.forEach(function (s) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        const selected = current === s;
+        if (selected) {
+          if (s === 'avail') {
+            btn.style.background = col;
+            btn.style.color = contrastText(col);
+            btn.style.borderColor = col;
+          } else if (s === 'partial') {
+            btn.style.background = 'repeating-linear-gradient(45deg, ' + col + '44, ' + col + '44 6px, var(--unavail) 6px, var(--unavail) 12px)';
+            btn.style.borderColor = col;
+            btn.style.color = 'var(--text)';
+          } else {
+            btn.style.background = 'var(--unavail)';
+            btn.style.borderColor = col;
+            btn.style.color = 'var(--text)';
+          }
+        }
+        const tick = document.createElement('span');
+        tick.className = 'tick';
+        tick.textContent = selected ? '✓' : '';
+        btn.appendChild(tick);
+        btn.appendChild(document.createTextNode(STATE_LABEL[s]));
+        btn.addEventListener('click', function () {
+          setMark(date, my.id, selected ? null : s); // tapping the current choice clears it
+        });
+        choice.appendChild(btn);
+      });
+      wrap.appendChild(choice);
+      if (current) {
+        const clear = document.createElement('div');
+        clear.className = 'choice-clear';
+        clear.textContent = 'Clear this day';
+        clear.addEventListener('click', function () { setMark(date, my.id, null); });
+        wrap.appendChild(clear);
+      }
+    }
     if (!sheetEmps.length) wrap.innerHTML = '<div style="color:var(--text-faint);font-size:13px;padding:12px 0">No active employees.</div>';
   }
 
