@@ -1,0 +1,31 @@
+# Sends every active employee a weekly email reminding them to update
+# their availability. Runs Sunday evenings; can also be run manually from
+# the Actions tab ("Run workflow") to test.
+#
+# Required repository secrets (Settings → Secrets and variables → Actions):
+#   FIREBASE_SERVICE_ACCOUNT — read-only service account key JSON
+#   GMAIL_USER               — the Gmail address that sends the reminders
+#   GMAIL_APP_PASSWORD       — a Gmail App Password for that address
+
+name: Weekly availability reminders
+
+on:
+  schedule:
+    - cron: '0 21 * * 0'   # Sundays 21:00 UTC = 5pm Buffalo (summer) / 4pm (winter)
+  workflow_dispatch: {}
+
+jobs:
+  remind:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install nodemailer@6 --no-save --no-audit --no-fund
+      - run: node scripts/send-reminders.mjs
+        env:
+          SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
