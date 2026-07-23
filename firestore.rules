@@ -1,0 +1,55 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+    function companySettings() {
+      return get(/databases/$(database)/documents/settings/company).data;
+    }
+    function isAdmin() {
+      return signedIn() && request.auth.token.email in companySettings().adminEmails;
+    }
+    function isEmployee() {
+      return signedIn() && exists(/databases/$(database)/documents/employees/$(request.auth.uid));
+    }
+
+    // Company settings: invite code + admin list. Only admins can see or change it.
+    match /settings/company {
+      allow read: if isAdmin();
+      allow write: if isAdmin();
+    }
+
+    // Employee roster. Anyone on the team can see it; you can only create
+    // your own profile, and only with the correct invite code.
+    match /employees/{uid} {
+      allow read: if isEmployee() || isAdmin();
+      allow create: if signedIn()
+        && request.auth.uid == uid
+        && request.resource.data.inviteCode == companySettings().inviteCode
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 60;
+      allow update: if isAdmin()
+        || (request.auth.uid == uid
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'color']));
+      allow delete: if isAdmin();
+    }
+
+    // Availability marks, one document per person per day (id: "{uid}_{date}").
+    // Everyone on the team can see all marks; you can only write your own.
+    // Admins can write anyone's.
+    match /availability/{markId} {
+      allow read: if isEmployee() || isAdmin();
+      allow create, update: if (isAdmin() || (isEmployee() && request.resource.data.uid == request.auth.uid))
+        && markId == request.resource.data.uid + '_' + request.resource.data.date
+        && request.resource.data.state in ['avail', 'partial', 'unavail'];
+      allow delete: if isAdmin() || (isEmployee() && resource.data.uid == request.auth.uid);
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
