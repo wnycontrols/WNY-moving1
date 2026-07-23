@@ -1,16 +1,11 @@
-// ─────────────────────────────────────────────────────────────
-// Paste your Firebase project's web config here (SETUP.md, step 2).
-// In the Firebase console: Project settings → General → Your apps
-// → SDK setup and configuration → Config.
-//
-// These values are safe to publish — they identify your project,
-// they don't grant access. Security comes from the Firestore rules.
-// ─────────────────────────────────────────────────────────────
+// Firebase project configuration for WNY Moving (project: wny-moving).
+// These values identify the project and are safe to publish —
+// access is controlled by Firebase Authentication and firestore.rules.
 window.FIREBASE_CONFIG = {
-  apiKey: "PASTE_YOUR_API_KEY",
-  authDomain: "PASTE_YOUR_PROJECT.firebaseapp.com",
-  projectId: "PASTE_YOUR_PROJECT_ID",
-  storageBucket: "PASTE_YOUR_PROJECT.appspot.com",
-  messagingSenderId: "PASTE_YOUR_SENDER_ID",
-  appId: "PASTE_YOUR_APP_ID"
+  apiKey: "AIzaSyBkTx7kk_iRzRIQ2FFEQyDQVOg55tN-r00",
+  authDomain: "wny-moving.firebaseapp.com",
+  projectId: "wny-moving",
+  storageBucket: "wny-moving.firebasestorage.app",
+  messagingSenderId: "711915660352",
+  appId: "1:711915660352:web:0eaae4718b3b25267f2ba5"
 };
