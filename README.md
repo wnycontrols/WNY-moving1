@@ -14,6 +14,8 @@ A black-and-white, dark-mode availability calendar where each employee signs in 
 - **Individual logins** — every employee has their own email + password (handled by Google Firebase Auth; passwords are hashed and never visible)
 - **Invite-code signup** — only people with your company invite code can create an account; change the code anytime
 - **Permissions** — employees can only edit *their own* days, name, and color; admins can edit everyone, remove employees, and change settings
+- **Multiple admins** — add any teammate's email in ⚙ settings to give them full admin powers
+- **Hide inactive employees** — admins can pause (⏸) anyone not currently working; they vanish from everyone's calendar (data kept) and can be reactivated from the Inactive section. Employees can't unhide themselves — enforced by the security rules
 - **Live sync** — changes appear on everyone's screen in real time
 - **Per-employee colors** — auto-assigned, changeable via a palette or any custom color
 - **Three availability states** per day, in the employee's color: Available (solid), Partial (striped), Unavailable (outlined, struck through)

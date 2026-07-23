@@ -153,8 +153,13 @@
   }
   .chip.active { background: var(--text); color: var(--bg); border-color: var(--text); font-weight: 600; }
   .chip.readonly { opacity: 0.6; cursor: default; }
+  .chip.inactive { opacity: 0.5; border-style: dashed; cursor: default; }
+  .chip.inactive .name-label { text-decoration: line-through; }
+  .chip.toggle-inactive { border-style: dashed; color: var(--text-faint); }
   .chip .x { font-size: 15px; line-height: 1; padding: 4px 6px; opacity: 0.55; }
   .chip .x:hover { opacity: 1; }
+  .chip .act { font-size: 11px; line-height: 1; padding: 5px 6px; opacity: 0.55; }
+  .chip .act:hover { opacity: 1; }
   .chip .initials {
     width: 22px; height: 22px; border-radius: 50%; flex: none;
     display: inline-flex; align-items: center; justify-content: center;
@@ -479,8 +484,18 @@
     '#ff4081', '#8d6e63', '#9e9e9e', '#cddc39'
   ];
 
-  $('hintDesktop').textContent = 'Click your chip, then click days to cycle: Available → Partial → Unavailable → clear. Click a name badge to cycle it directly. Click your initials circle to change your color.';
-  $('hintMobile').textContent = 'Tap any day to open it, then tap your name to cycle: Available → Partial → Unavailable → clear.';
+  function refreshHints() {
+    const myEmp = me && employees.find(e => e.id === me.uid);
+    if (myEmp && !isActiveEmp(myEmp) && !isAdmin) {
+      const msg = 'You are currently marked inactive, so you are hidden from the calendar. Ask a manager to reactivate you.';
+      $('hintDesktop').textContent = msg;
+      $('hintMobile').textContent = msg;
+      return;
+    }
+    const adminExtra = isAdmin ? ' ⏸ on a chip hides someone who isn’t currently working (their data is kept); reopen them from the “Inactive” section.' : '';
+    $('hintDesktop').textContent = 'Click your chip, then click days to cycle: Available → Partial → Unavailable → clear. Click a name badge to cycle it directly. Click your initials circle to change your color.' + adminExtra;
+    $('hintMobile').textContent = 'Tap any day to open it, then tap your name to cycle: Available → Partial → Unavailable → clear.' + adminExtra;
+  }
 
   // ── Config check ──
   const cfg = window.FIREBASE_CONFIG;
@@ -513,6 +528,7 @@
   let openPaletteFor = null;
   let openSheetDate = null;
   let pendingProfile = null;   // { name, inviteCode } captured at signup
+  let showInactive = false;    // admin: reveal the inactive-employees section
 
   const isNarrow = () => window.matchMedia('(max-width: 700px)').matches;
 
@@ -535,6 +551,8 @@
   }
   function canEdit(uid) { return isAdmin || (me && uid === me.uid); }
   function empColor(emp) { return emp.color || '#ffffff'; }
+  function isActiveEmp(emp) { return emp.active !== false; }
+  function activeEmployees() { return employees.filter(isActiveEmp); }
 
   let toastTimer = null;
   function toast(msg) {
@@ -631,9 +649,10 @@
     unsubEmployees = db.collection('employees').onSnapshot(function (snap) {
       employees = snap.docs.map(d => Object.assign({ id: d.id }, d.data()));
       employees.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-      const mine = employees.find(e => e.id === me.uid);
-      if (!selectedEmployee || !employees.some(e => e.id === selectedEmployee)) {
-        selectedEmployee = mine ? mine.id : (employees[0] ? employees[0].id : null);
+      const act = activeEmployees();
+      const mine = act.find(e => e.id === me.uid);
+      if (!selectedEmployee || !act.some(e => e.id === selectedEmployee)) {
+        selectedEmployee = mine ? mine.id : (act[0] ? act[0].id : null);
       }
       render();
     }, function () { toast('Lost access to the roster — try signing in again.'); });
@@ -688,6 +707,13 @@
   function setColor(emp, color) {
     db.doc('employees/' + emp.id).update({ color: color })
       .catch(function () { toast('Could not change color.'); });
+  }
+
+  function setActive(emp, active) {
+    if (!isAdmin) return;
+    db.doc('employees/' + emp.id).update({ active: active })
+      .then(function () { toast(emp.name + (active ? ' is back on the calendar.' : ' hidden from the calendar.')); })
+      .catch(function () { toast('Could not update ' + emp.name + '.'); });
   }
 
   async function removeEmployee(emp) {
@@ -800,7 +826,8 @@
     const wrap = $('sheetRows');
     wrap.innerHTML = '';
     const dayMarks = marks[date] || {};
-    employees.forEach(function (emp) {
+    const sheetEmps = activeEmployees();
+    sheetEmps.forEach(function (emp) {
       const row = document.createElement('div');
       const editable = canEdit(emp.id);
       row.className = 'sheet-row' + (editable ? '' : ' readonly');
@@ -839,7 +866,7 @@
       if (editable) row.addEventListener('click', function () { cycleMark(date, emp.id); });
       wrap.appendChild(row);
     });
-    if (!employees.length) wrap.innerHTML = '<div style="color:var(--text-faint);font-size:13px;padding:12px 0">No employees yet.</div>';
+    if (!sheetEmps.length) wrap.innerHTML = '<div style="color:var(--text-faint);font-size:13px;padding:12px 0">No active employees.</div>';
   }
 
   // ── Month nav ──
@@ -857,13 +884,16 @@
   // ── Render ──
   function render() {
     if (!me) return;
+    refreshHints();
     const y = viewDate.getFullYear(), m = viewDate.getMonth();
     $('monthLabel').textContent = MONTHS[m] + ' ' + y;
 
     // Chips
     const chips = $('employeeChips');
     chips.innerHTML = '';
-    employees.forEach(function (emp) {
+    const actEmps = activeEmployees();
+    const inactEmps = employees.filter(e => !isActiveEmp(e));
+    actEmps.forEach(function (emp) {
       const editable = canEdit(emp.id);
       const chip = document.createElement('div');
       chip.className = 'chip' + (emp.id === selectedEmployee ? ' active' : '') + (editable ? '' : ' readonly');
@@ -885,14 +915,22 @@
       chip.appendChild(init);
 
       const label = document.createElement('span');
+      label.className = 'name-label';
       label.textContent = emp.name + (emp.id === me.uid ? ' (you)' : '');
       chip.appendChild(label);
 
       if (isAdmin) {
+        const hide = document.createElement('span');
+        hide.className = 'act';
+        hide.textContent = '⏸';
+        hide.title = 'Hide ' + emp.name + ' (mark inactive — their data is kept)';
+        hide.addEventListener('click', function (e) { e.stopPropagation(); setActive(emp, false); });
+        chip.appendChild(hide);
+
         const x = document.createElement('span');
         x.className = 'x';
         x.textContent = '×';
-        x.title = 'Remove ' + emp.name;
+        x.title = 'Remove ' + emp.name + ' permanently';
         x.addEventListener('click', function (e) { e.stopPropagation(); removeEmployee(emp); });
         chip.appendChild(x);
       }
@@ -928,6 +966,52 @@
       chips.appendChild(chip);
     });
 
+    // Inactive section (admins only)
+    if (isAdmin && inactEmps.length > 0) {
+      const tog = document.createElement('div');
+      tog.className = 'chip toggle-inactive';
+      tog.textContent = (showInactive ? '▾' : '▸') + ' Inactive (' + inactEmps.length + ')';
+      tog.title = showInactive ? 'Collapse inactive employees' : 'Show inactive employees';
+      tog.addEventListener('click', function () { showInactive = !showInactive; render(); });
+      chips.appendChild(tog);
+
+      if (showInactive) {
+        inactEmps.forEach(function (emp) {
+          const chip = document.createElement('div');
+          chip.className = 'chip inactive';
+          chip.title = emp.name + ' is inactive — hidden from the calendar';
+
+          const init = document.createElement('span');
+          init.className = 'initials';
+          init.textContent = initials(emp.name);
+          init.style.background = empColor(emp);
+          init.style.color = contrastText(empColor(emp));
+          chip.appendChild(init);
+
+          const label = document.createElement('span');
+          label.className = 'name-label';
+          label.textContent = emp.name;
+          chip.appendChild(label);
+
+          const back = document.createElement('span');
+          back.className = 'act';
+          back.textContent = '▶';
+          back.title = 'Reactivate ' + emp.name + ' (back on the calendar)';
+          back.addEventListener('click', function (e) { e.stopPropagation(); setActive(emp, true); });
+          chip.appendChild(back);
+
+          const x = document.createElement('span');
+          x.className = 'x';
+          x.textContent = '×';
+          x.title = 'Remove ' + emp.name + ' permanently';
+          x.addEventListener('click', function (e) { e.stopPropagation(); removeEmployee(emp); });
+          chip.appendChild(x);
+
+          chips.appendChild(chip);
+        });
+      }
+    }
+
     // Calendar
     const cal = $('calendar');
     cal.innerHTML = '';
@@ -938,12 +1022,14 @@
       cal.appendChild(el);
     });
 
-    if (employees.length === 0) {
+    if (actEmps.length === 0) {
       const empty = document.createElement('div');
       empty.className = 'empty-state';
-      empty.innerHTML = isAdmin
-        ? 'No employees yet. Share the site link and the invite code with your team — they create their own accounts and appear here.'
-        : 'No employees yet.';
+      empty.textContent = employees.length > 0
+        ? 'Everyone is currently marked inactive.'
+        : (isAdmin
+          ? 'No employees yet. Share the site link and the invite code with your team — they create their own accounts and appear here.'
+          : 'No employees yet.');
       cal.appendChild(empty);
       return;
     }
@@ -979,17 +1065,17 @@
       num.textContent = cd;
       cell.appendChild(num);
 
-      const availCount = employees.filter(e => dayMarks[e.id] === 'avail').length;
+      const availCount = actEmps.filter(e => dayMarks[e.id] === 'avail').length;
       if (availCount > 0) {
         const count = document.createElement('span');
         count.className = 'count';
-        count.textContent = availCount + '/' + employees.length;
+        count.textContent = availCount + '/' + actEmps.length;
         cell.appendChild(count);
       }
 
       const marksEl = document.createElement('div');
       marksEl.className = 'marks';
-      employees.forEach(function (emp) {
+      actEmps.forEach(function (emp) {
         const s = dayMarks[emp.id];
         if (!s) return;
         const mark = document.createElement('div');
