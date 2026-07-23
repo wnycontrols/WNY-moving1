@@ -220,16 +220,18 @@
   .day.today .daynum { border: 1.5px solid var(--text); border-radius: 50%; color: var(--text); }
   .day .count { position: absolute; top: 8px; right: 6px; font-size: 10px; color: var(--text-faint); }
 
-  .marks { display: flex; flex-direction: column; gap: 4px; }
+  /* Condensed per-person badges: colored initials, wrapping in a row */
+  .marks { display: flex; flex-direction: row; flex-wrap: wrap; gap: 3px; }
   .mark {
-    display: flex; align-items: center; gap: 6px;
-    font-size: 11px; padding: 3px 7px;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 700; letter-spacing: 0.5px;
+    min-width: 26px; padding: 3px 5px;
     border: 1px solid var(--border-strong);
     cursor: pointer; user-select: none; transition: all 0.1s;
-    overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+    white-space: nowrap;
   }
-  .mark .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
-  .mark.avail { font-weight: 600; }
+  .mark .dot { display: none; width: 9px; height: 9px; border-radius: 50%; flex: none; }
+  .mark.avail { font-weight: 700; }
   .mark.unavail { background: var(--unavail); color: var(--text-faint); }
   .mark.unavail .name { text-decoration: line-through; }
   .mark.partial { color: var(--text); }
@@ -247,10 +249,10 @@
     .day { min-height: 64px; padding: 4px; }
     .day .count { display: none; }
     .daynum { width: 22px; height: 22px; font-size: 12px; margin-bottom: 3px; }
-    .marks { flex-direction: row; flex-wrap: wrap; gap: 3px; pointer-events: none; }
-    .mark { padding: 0; border: none; background: none !important; }
+    .marks { pointer-events: none; }
+    .mark { padding: 0; min-width: 0; border: none; background: none !important; }
     .mark .name { display: none; }
-    .mark .dot { width: 9px; height: 9px; }
+    .mark .dot { display: block; }
     .mark.unavail { opacity: 0.9; }
     .month-nav h2 { font-size: 15px; min-width: 130px; }
     main { padding: 12px 8px 72px; }
@@ -1103,7 +1105,7 @@
 
         const nm = document.createElement('span');
         nm.className = 'name';
-        nm.textContent = emp.name;
+        nm.textContent = initials(emp.name);
         mark.appendChild(nm);
 
         mark.addEventListener('click', function (e) {
