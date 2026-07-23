@@ -138,7 +138,25 @@
   .month-nav button { min-width: 44px; }
 
   /* ── Chips ── */
+  .team-toggle {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 12px; color: var(--text-dim);
+    letter-spacing: 1px; text-transform: uppercase; font-weight: 700;
+    padding: 8px 2px; margin-bottom: 8px;
+    cursor: pointer; user-select: none;
+    border-bottom: 1px solid var(--border);
+  }
+  .team-toggle:hover { color: var(--text); }
+  .team-toggle .mini {
+    display: inline-flex; gap: 3px; text-transform: none; letter-spacing: 0;
+  }
+  .team-toggle .mini span {
+    width: 18px; height: 18px; border-radius: 50%;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 8px; font-weight: 700;
+  }
   .employees { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+  .employees.collapsed { display: none; }
   .chip {
     display: flex; align-items: center; gap: 8px;
     border: 1px solid var(--border-strong);
@@ -246,6 +264,7 @@
 
   /* ── Phone layout: dots instead of name badges, tap opens day sheet ── */
   @media (max-width: 700px) {
+    .chip { padding: 5px 8px; font-size: 12px; min-height: 36px; gap: 6px; }
     .day { min-height: 76px; padding: 3px; }
     .day .count { display: none; }
     .daynum { width: 20px; height: 20px; font-size: 11px; margin-bottom: 2px; }
@@ -420,6 +439,7 @@
       <button id="todayBtn">Today</button>
     </div>
 
+    <div class="team-toggle" id="teamToggle" role="button" tabindex="0"></div>
     <div class="employees" id="employeeChips"></div>
 
     <div class="legend">
@@ -531,6 +551,10 @@
   let openSheetDate = null;
   let pendingProfile = null;   // { name, inviteCode } captured at signup
   let showInactive = false;    // admin: reveal the inactive-employees section
+  const COLLAPSE_KEY = 'wny-team-collapsed';
+  let teamCollapsed = localStorage.getItem(COLLAPSE_KEY) !== null
+    ? localStorage.getItem(COLLAPSE_KEY) === '1'
+    : window.matchMedia('(max-width: 700px)').matches; // start collapsed on phones
 
   const isNarrow = () => window.matchMedia('(max-width: 700px)').matches;
 
@@ -890,11 +914,45 @@
     const y = viewDate.getFullYear(), m = viewDate.getMonth();
     $('monthLabel').textContent = MONTHS[m] + ' ' + y;
 
-    // Chips
+    // Team toggle bar + chips
     const chips = $('employeeChips');
     chips.innerHTML = '';
     const actEmps = activeEmployees();
     const inactEmps = employees.filter(e => !isActiveEmp(e));
+
+    const tt = $('teamToggle');
+    tt.innerHTML = '';
+    tt.appendChild(document.createTextNode((teamCollapsed ? '▸' : '▾') + ' Team (' + actEmps.length + ')'));
+    if (teamCollapsed) {
+      const mini = document.createElement('span');
+      mini.className = 'mini';
+      actEmps.slice(0, 8).forEach(function (emp) {
+        const b = document.createElement('span');
+        b.textContent = initials(emp.name);
+        b.style.background = empColor(emp);
+        b.style.color = contrastText(empColor(emp));
+        b.title = emp.name;
+        mini.appendChild(b);
+      });
+      if (actEmps.length > 8) {
+        const more = document.createElement('span');
+        more.textContent = '+' + (actEmps.length - 8);
+        more.style.background = 'var(--panel-2)';
+        more.style.color = 'var(--text-dim)';
+        mini.appendChild(more);
+      }
+      tt.appendChild(mini);
+      const sel = actEmps.find(e => e.id === selectedEmployee);
+      if (sel && !isNarrow()) tt.appendChild(document.createTextNode(' — editing: ' + sel.name));
+    }
+    tt.title = teamCollapsed ? 'Show the team list' : 'Hide the team list';
+    tt.onclick = function () {
+      teamCollapsed = !teamCollapsed;
+      localStorage.setItem(COLLAPSE_KEY, teamCollapsed ? '1' : '0');
+      render();
+    };
+    chips.className = 'employees' + (teamCollapsed ? ' collapsed' : '');
+    if (teamCollapsed) { /* chips stay in DOM but hidden */ }
     actEmps.forEach(function (emp) {
       const editable = canEdit(emp.id);
       const chip = document.createElement('div');
