@@ -499,6 +499,14 @@
     <label class="field" for="setAdmins">Admin Emails (one per line, lowercase)</label>
     <textarea id="setAdmins" rows="3" required></textarea>
     <div class="note">Admins can edit everyone's availability, manage employees, and change these settings. Don't remove your own email.</div>
+    <div id="hideMeBlock">
+      <label class="field">My visibility</label>
+      <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer">
+        <input type="checkbox" id="setHideMe" style="width:18px;height:18px;accent-color:#fff">
+        Hide my name from the calendar
+      </label>
+      <div class="note">For admins who run the schedule but aren't on it. You keep full admin control and can still see everyone — you just don't appear on the calendar and skip the weekly reminder emails. Untick to reappear.</div>
+    </div>
     <div class="form-msg" id="settingsMsg"></div>
     <div class="form-actions">
       <button type="button" id="settingsCancel">Cancel</button>
@@ -613,7 +621,8 @@
   function canEdit(uid) { return isAdmin || (me && uid === me.uid); }
   function empColor(emp) { return emp.color || '#ffffff'; }
   function isActiveEmp(emp) { return emp.active !== false; }
-  function activeEmployees() { return employees.filter(isActiveEmp); }
+  function isVisibleEmp(emp) { return isActiveEmp(emp) && emp.hidden !== true; }
+  function activeEmployees() { return employees.filter(isVisibleEmp); }
 
   let toastTimer = null;
   function toast(msg) {
@@ -845,6 +854,9 @@
   $('settingsBtn').addEventListener('click', function () {
     $('setInvite').value = settings && settings.inviteCode || '';
     $('setAdmins').value = (settings && settings.adminEmails || []).join('\n');
+    const myEmp = employees.find(e => e.id === me.uid);
+    $('hideMeBlock').style.display = myEmp ? '' : 'none';
+    $('setHideMe').checked = !!(myEmp && myEmp.hidden === true);
     $('settingsMsg').textContent = '';
     $('settingsModal').classList.add('open');
     $('modalOverlay').classList.add('open');
@@ -863,7 +875,15 @@
     if (me.email && !admins.includes(me.email.toLowerCase())) {
       if (!confirm('Your own email is not in the admin list — you will lose admin access. Continue?')) return;
     }
-    db.doc('settings/company').set({ inviteCode: invite, adminEmails: admins })
+    const writes = [db.doc('settings/company').set({ inviteCode: invite, adminEmails: admins })];
+    const myEmp = employees.find(e => e.id === me.uid);
+    if (myEmp && $('hideMeBlock').style.display !== 'none') {
+      const hide = $('setHideMe').checked;
+      if (hide !== (myEmp.hidden === true)) {
+        writes.push(db.doc('employees/' + me.uid).update({ hidden: hide }));
+      }
+    }
+    Promise.all(writes)
       .then(function () { settings = { inviteCode: invite, adminEmails: admins }; closeModal(); toast('Settings saved.'); })
       .catch(function () { $('settingsMsg').textContent = 'Could not save settings.'; });
   });

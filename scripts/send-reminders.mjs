@@ -70,6 +70,7 @@ async function listEmployees() {
         name: fieldVal(f.name) || 'there',
         email: fieldVal(f.email),
         active: fieldVal(f.active) !== false,
+        hidden: fieldVal(f.hidden) === true,
       });
     }
     pageToken = data.nextPageToken || '';
@@ -139,7 +140,7 @@ function emailBody(name, filledCount) {
 
 // ── Main ──
 TOKEN = await getAccessToken();
-const employees = (await listEmployees()).filter(e => e.active && e.email);
+const employees = (await listEmployees()).filter(e => e.active && !e.hidden && e.email);
 const counts = await countUpcomingMarks();
 console.log('Active employees with an email address: ' + employees.length);
 
