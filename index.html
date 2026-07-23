@@ -201,7 +201,12 @@
 
   .hint { font-size: 12px; color: var(--text-faint); margin-bottom: 12px; line-height: 1.5; }
 
-  .legend { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+  .viewbar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; }
+  .viewswitch { display: flex; }
+  .viewswitch button { min-height: 36px; padding: 6px 16px; font-size: 12px; font-weight: 600; }
+  .viewswitch button + button { border-left: none; }
+  .viewswitch button.on { background: var(--text); color: var(--bg); border-color: var(--text); }
+  .legend { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
   .legend .item { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-dim); }
   .swatch { width: 12px; height: 12px; border: 1px solid var(--border-strong); flex: none; }
   .swatch.avail { background: var(--text); }
@@ -254,6 +259,7 @@
   .mark.unavail .name { text-decoration: line-through; }
   .mark.partial { color: var(--text); }
   .mark:hover { border-color: var(--text); }
+  .mark.wide { width: 100%; justify-content: flex-start; letter-spacing: 0.3px; }
 
   .empty-state {
     grid-column: 1 / -1; padding: 48px 20px; text-align: center;
@@ -442,10 +448,15 @@
     <div class="team-toggle" id="teamToggle" role="button" tabindex="0"></div>
     <div class="employees" id="employeeChips"></div>
 
-    <div class="legend">
-      <div class="item"><span class="swatch avail"></span> Available</div>
-      <div class="item"><span class="swatch partial"></span> Partial</div>
-      <div class="item"><span class="swatch unavail"></span> Unavailable</div>
+    <div class="viewbar">
+      <div class="viewswitch">
+        <button type="button" id="viewMine">My days</button><button type="button" id="viewAll">Everyone</button>
+      </div>
+      <div class="legend">
+        <div class="item"><span class="swatch avail"></span> Available</div>
+        <div class="item"><span class="swatch partial"></span> Partial</div>
+        <div class="item"><span class="swatch unavail"></span> Unavailable</div>
+      </div>
     </div>
 
     <div class="hint desktop-only" id="hintDesktop"></div>
@@ -555,6 +566,14 @@
   let teamCollapsed = localStorage.getItem(COLLAPSE_KEY) !== null
     ? localStorage.getItem(COLLAPSE_KEY) === '1'
     : window.matchMedia('(max-width: 700px)').matches; // start collapsed on phones
+  const VIEWMODE_KEY = 'wny-view-mode';
+  let viewMode = localStorage.getItem(VIEWMODE_KEY);   // 'mine' | 'all' | null (= default by role)
+
+  function effectiveViewMode() {
+    const hasProfile = me && employees.some(e => e.id === me.uid && isActiveEmp(e));
+    if (!hasProfile) return 'all';                     // admins without a profile, or hidden users
+    return viewMode || (isAdmin ? 'all' : 'mine');     // employees start on "My days"
+  }
 
   const isNarrow = () => window.matchMedia('(max-width: 700px)').matches;
 
@@ -848,11 +867,16 @@
     const parts = date.split('-');
     const d = new Date(+parts[0], +parts[1] - 1, +parts[2]);
     $('sheetTitle').textContent = DOW[d.getDay()] + ', ' + MONTHS[d.getMonth()] + ' ' + d.getDate();
-    $('sheetSub').textContent = isAdmin ? 'Tap anyone to change their status.' : 'Tap your name to change your status.';
+    const mineOnly = effectiveViewMode() === 'mine';
+    $('sheetSub').textContent = mineOnly
+      ? 'Tap to change your status. Switch to “Everyone” to see the team.'
+      : (isAdmin ? 'Tap anyone to change their status.' : 'Tap your name to change your status.');
     const wrap = $('sheetRows');
     wrap.innerHTML = '';
     const dayMarks = marks[date] || {};
-    const sheetEmps = activeEmployees();
+    const sheetEmps = mineOnly
+      ? activeEmployees().filter(e => e.id === me.uid)
+      : activeEmployees();
     sheetEmps.forEach(function (emp) {
       const row = document.createElement('div');
       const editable = canEdit(emp.id);
@@ -894,6 +918,14 @@
     });
     if (!sheetEmps.length) wrap.innerHTML = '<div style="color:var(--text-faint);font-size:13px;padding:12px 0">No active employees.</div>';
   }
+
+  // ── View mode switch ──
+  $('viewMine').addEventListener('click', function () {
+    viewMode = 'mine'; localStorage.setItem(VIEWMODE_KEY, 'mine'); render();
+  });
+  $('viewAll').addEventListener('click', function () {
+    viewMode = 'all'; localStorage.setItem(VIEWMODE_KEY, 'all'); render();
+  });
 
   // ── Month nav ──
   $('prevBtn').addEventListener('click', function () { viewDate.setMonth(viewDate.getMonth() - 1); subscribeMarks(); render(); });
@@ -1072,6 +1104,14 @@
       }
     }
 
+    // View mode
+    const mineOnly = effectiveViewMode() === 'mine';
+    const hasOwnActive = me && actEmps.some(e => e.id === me.uid);
+    $('viewMine').parentElement.style.display = hasOwnActive ? '' : 'none';
+    $('viewMine').classList.toggle('on', mineOnly);
+    $('viewAll').classList.toggle('on', !mineOnly);
+    const calEmps = mineOnly ? actEmps.filter(e => e.id === me.uid) : actEmps;
+
     // Calendar
     const cal = $('calendar');
     cal.innerHTML = '';
@@ -1135,11 +1175,11 @@
 
       const marksEl = document.createElement('div');
       marksEl.className = 'marks';
-      actEmps.forEach(function (emp) {
+      calEmps.forEach(function (emp) {
         const s = dayMarks[emp.id];
         if (!s) return;
         const mark = document.createElement('div');
-        mark.className = 'mark ' + s;
+        mark.className = 'mark ' + s + (mineOnly ? ' wide' : '');
         mark.title = emp.name + ': ' + STATE_LABEL[s];
 
         const dot = document.createElement('span');
@@ -1163,7 +1203,7 @@
 
         const nm = document.createElement('span');
         nm.className = 'name';
-        nm.textContent = initials(emp.name);
+        nm.textContent = mineOnly ? STATE_LABEL[s] : initials(emp.name);
         mark.appendChild(nm);
 
         mark.addEventListener('click', function (e) {
