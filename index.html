@@ -311,6 +311,7 @@
   }
   .sheet-row:last-child { border-bottom: none; }
   .sheet-row.readonly { cursor: default; opacity: 0.55; }
+  .sheet-row.selected { background: var(--panel-2); }
   .sheet-row .initials {
     width: 32px; height: 32px; border-radius: 50%; flex: none;
     display: inline-flex; align-items: center; justify-content: center;
@@ -584,6 +585,7 @@
   let unsubEmployees = null, unsubMarks = null;
   let openPaletteFor = null;
   let openSheetDate = null;
+  let sheetSelected = null;    // admin day sheet: which person the three buttons apply to
   let pendingProfile = null;   // { name, inviteCode } captured at signup
   let showInactive = false;    // admin: reveal the inactive-employees section
   const COLLAPSE_KEY = 'wny-team-collapsed';
@@ -891,6 +893,7 @@
   // ── Day sheet (phone) ──
   function openSheet(date) {
     openSheetDate = date;
+    sheetSelected = null;
     renderSheet(date);
     $('daySheet').classList.add('open');
     $('sheetOverlay').classList.add('open');
@@ -912,8 +915,13 @@
     const allActive = activeEmployees();
     // Regular accounts update only themselves here; admins manage everyone.
     const sheetEmps = isAdmin ? allActive : allActive.filter(e => e.id === me.uid);
+    // Who the three buttons apply to: admins pick a row; employees always themselves
+    const target = isAdmin
+      ? (sheetEmps.find(e => e.id === sheetSelected) || sheetEmps[0] || null)
+      : (sheetEmps[0] || null);
+    if (target) sheetSelected = target.id;
     if (isAdmin) {
-      $('sheetSub').textContent = 'Tap anyone to change their status.';
+      $('sheetSub').textContent = 'Tap a name, then pick their status below.';
     } else {
       const n = { avail: 0, partial: 0, unavail: 0 };
       allActive.forEach(function (e) { if (dayMarks[e.id]) n[dayMarks[e.id]]++; });
@@ -923,7 +931,9 @@
     sheetEmps.forEach(function (emp) {
       const row = document.createElement('div');
       const editable = canEdit(emp.id);
-      row.className = 'sheet-row' + (editable ? '' : ' readonly');
+      row.className = 'sheet-row' + (editable ? '' : ' readonly')
+        + (isAdmin && target && emp.id === target.id ? ' selected' : '');
+      if (isAdmin && target && emp.id === target.id) row.style.borderLeft = '3px solid ' + empColor(emp);
 
       const init = document.createElement('span');
       init.className = 'initials';
@@ -956,13 +966,13 @@
       }
       row.appendChild(pill);
 
-      if (editable && isAdmin) row.addEventListener('click', function () { cycleMark(date, emp.id); });
+      if (isAdmin) row.addEventListener('click', function () { sheetSelected = emp.id; renderSheet(date); });
       wrap.appendChild(row);
     });
 
-    // Regular accounts: pick from the three options directly
-    if (!isAdmin && sheetEmps.length === 1) {
-      const my = sheetEmps[0];
+    // Three-option chooser applies to the selected person (admins) or yourself
+    if (target && canEdit(target.id)) {
+      const my = target;
       const current = dayMarks[my.id];
       const col = empColor(my);
       const choice = document.createElement('div');
