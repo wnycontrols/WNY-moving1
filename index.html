@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WNY Moving — Employee Availability</title>
+<style>
+  :root {
+    --bg: #000000;
+    --panel: #0d0d0d;
+    --panel-2: #161616;
+    --border: #2a2a2a;
+    --border-strong: #3d3d3d;
+    --text: #ffffff;
+    --text-dim: #9a9a9a;
+    --text-faint: #5c5c5c;
+    --avail: #ffffff;
+    --avail-text: #000000;
+    --unavail: #1a1a1a;
+    --partial: #6e6e6e;
+    --today-ring: #ffffff;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    min-height: 100vh;
+  }
+
+  header {
+    border-bottom: 1px solid var(--border);
+    padding: 20px 28px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    position: sticky;
+    top: 0;
+    background: var(--bg);
+    z-index: 20;
+  }
+
+  .brand { display: flex; align-items: center; gap: 14px; }
+
+  .logo {
+    width: 42px; height: 42px;
+    border: 2px solid var(--text);
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 800; font-size: 15px; letter-spacing: 1px;
+  }
+
+  .brand h1 { font-size: 19px; font-weight: 700; letter-spacing: 0.5px; }
+  .brand .sub { font-size: 12px; color: var(--text-dim); letter-spacing: 2.5px; text-transform: uppercase; margin-top: 2px; }
+
+  .month-nav { display: flex; align-items: center; gap: 8px; }
+
+  .month-nav h2 {
+    font-size: 17px; font-weight: 600; min-width: 190px; text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
+
+  button {
+    background: transparent;
+    color: var(--text);
+    border: 1px solid var(--border-strong);
+    padding: 8px 14px;
+    font-size: 13px;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background 0.12s, color 0.12s, border-color 0.12s;
+  }
+  button:hover { background: var(--text); color: var(--bg); border-color: var(--text); }
+  button.primary { background: var(--text); color: var(--bg); border-color: var(--text); font-weight: 600; }
+  button.primary:hover { background: transparent; color: var(--text); }
+
+  main { padding: 24px 28px 64px; max-width: 1400px; margin: 0 auto; }
+
+  /* ── Toolbar ── */
+  .toolbar {
+    display: flex; align-items: center; justify-content: space-between;
+    flex-wrap: wrap; gap: 14px; margin-bottom: 20px;
+  }
+
+  .add-employee { display: flex; gap: 8px; }
+
+  input[type="text"] {
+    background: var(--panel);
+    border: 1px solid var(--border-strong);
+    color: var(--text);
+    padding: 8px 12px;
+    font-size: 13px;
+    font-family: inherit;
+    width: 200px;
+  }
+  input[type="text"]:focus { outline: none; border-color: var(--text); }
+  input[type="text"]::placeholder { color: var(--text-faint); }
+
+  .legend { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; }
+  .legend .item { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--text-dim); }
+  .swatch { width: 14px; height: 14px; border: 1px solid var(--border-strong); }
+  .swatch.avail { background: var(--avail); }
+  .swatch.unavail { background: var(--unavail); }
+  .swatch.partial { background: repeating-linear-gradient(45deg, var(--partial), var(--partial) 3px, var(--unavail) 3px, var(--unavail) 6px); }
+
+  /* ── Employee filter chips ── */
+  .employees {
+    display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px;
+  }
+  .chip {
+    display: flex; align-items: center; gap: 8px;
+    border: 1px solid var(--border-strong);
+    padding: 6px 10px 6px 12px;
+    font-size: 13px;
+    cursor: pointer;
+    user-select: none;
+    color: var(--text-dim);
+    transition: all 0.12s;
+  }
+  .chip.active { background: var(--text); color: var(--bg); border-color: var(--text); font-weight: 600; }
+  .chip .x {
+    font-size: 14px; line-height: 1; padding: 1px 4px;
+    opacity: 0.55;
+  }
+  .chip .x:hover { opacity: 1; }
+  .chip .initials {
+    width: 20px; height: 20px; border: 1px solid currentColor;
+    border-radius: 50%;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 9px; font-weight: 700;
+  }
+
+  .hint { font-size: 12px; color: var(--text-faint); margin-bottom: 16px; }
+
+  /* ── Calendar grid ── */
+  .calendar {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    border: 1px solid var(--border);
+    border-right: none;
+    border-bottom: none;
+  }
+
+  .dow {
+    padding: 10px 8px;
+    text-align: center;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    border-right: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    background: var(--panel);
+  }
+
+  .day {
+    min-height: 118px;
+    border-right: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    padding: 8px;
+    background: var(--bg);
+    position: relative;
+  }
+  .day.other-month { background: var(--panel); }
+  .day.other-month .daynum { color: var(--text-faint); }
+
+  .daynum {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-dim);
+    margin-bottom: 8px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px; height: 26px;
+    font-variant-numeric: tabular-nums;
+  }
+  .day.today .daynum {
+    border: 1.5px solid var(--today-ring);
+    border-radius: 50%;
+    color: var(--text);
+  }
+
+  .day .count {
+    position: absolute; top: 10px; right: 8px;
+    font-size: 10px; color: var(--text-faint);
+    letter-spacing: 0.5px;
+  }
+
+  .marks { display: flex; flex-direction: column; gap: 4px; }
+
+  .mark {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 11px;
+    padding: 3px 7px;
+    border: 1px solid var(--border-strong);
+    cursor: pointer;
+    user-select: none;
+    transition: all 0.1s;
+    overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  }
+  .mark .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+
+  .mark.avail { background: var(--avail); color: var(--avail-text); border-color: var(--avail); font-weight: 600; }
+  .mark.avail .dot { background: var(--avail-text); }
+
+  .mark.unavail { background: var(--unavail); color: var(--text-faint); border-color: var(--border); }
+  .mark.unavail .dot { border: 1px solid var(--text-faint); }
+  .mark.unavail .name { text-decoration: line-through; }
+
+  .mark.partial {
+    background: repeating-linear-gradient(45deg, #2e2e2e, #2e2e2e 4px, var(--unavail) 4px, var(--unavail) 8px);
+    color: var(--text); border-color: var(--partial);
+  }
+  .mark.partial .dot { background: var(--partial); }
+
+  .mark:hover { border-color: var(--text); }
+
+  .empty-state {
+    grid-column: 1 / -1;
+    padding: 60px 20px;
+    text-align: center;
+    color: var(--text-faint);
+    border-right: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    font-size: 14px;
+  }
+
+  footer {
+    text-align: center;
+    padding: 24px;
+    color: var(--text-faint);
+    font-size: 11px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    border-top: 1px solid var(--border);
+  }
+
+  @media (max-width: 760px) {
+    header, main { padding-left: 14px; padding-right: 14px; }
+    .day { min-height: 84px; padding: 5px; }
+    .mark { font-size: 9px; padding: 2px 4px; }
+    .mark .dot { display: none; }
+    .month-nav h2 { min-width: 140px; font-size: 14px; }
+    input[type="text"] { width: 140px; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <div class="logo">WNY</div>
+    <div>
+      <h1>WNY Moving</h1>
+      <div class="sub">Employee Availability</div>
+    </div>
+  </div>
+  <div class="month-nav">
+    <button id="prevBtn" aria-label="Previous month">&#8592;</button>
+    <h2 id="monthLabel"></h2>
+    <button id="nextBtn" aria-label="Next month">&#8594;</button>
+    <button id="todayBtn">Today</button>
+  </div>
+</header>
+
+<main>
+  <div class="toolbar">
+    <form class="add-employee" id="addForm">
+      <input type="text" id="nameInput" placeholder="Add employee name…" maxlength="40" autocomplete="off">
+      <button type="submit" class="primary">+ Add</button>
+    </form>
+    <div class="legend">
+      <div class="item"><span class="swatch avail"></span> Available</div>
+      <div class="item"><span class="swatch partial"></span> Partial / AM-PM only</div>
+      <div class="item"><span class="swatch unavail"></span> Unavailable</div>
+    </div>
+  </div>
+
+  <div class="employees" id="employeeChips"></div>
+  <div class="hint">Click an employee chip to select them, then click days on the calendar to cycle their status: Available &rarr; Partial &rarr; Unavailable. Click a name badge on any day to cycle it directly. &times; removes an employee.</div>
+
+  <div class="calendar" id="calendar"></div>
+</main>
+
+<footer>WNY Moving &middot; Availability data is saved in this browser</footer>
+
+<script>
+(function () {
+  const STORAGE_KEY = 'wny-availability-v1';
+  const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  const STATES = ['avail', 'partial', 'unavail'];
+  const STATE_LABEL = { avail: 'Available', partial: 'Partial', unavail: 'Unavailable' };
+
+  let state = load();
+  let view = new Date();
+  view.setDate(1);
+  let selectedEmployee = state.employees.length ? state.employees[0].id : null;
+
+  function load() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && Array.isArray(parsed.employees) && parsed.marks) return parsed;
+      }
+    } catch (e) { /* corrupted storage — start fresh */ }
+    return { employees: [], marks: {} };
+  }
+
+  function save() {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  }
+
+  function dateKey(y, m, d) {
+    return y + '-' + String(m + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+  }
+
+  function initials(name) {
+    return name.trim().split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase();
+  }
+
+  // ── Employees ──
+  const addForm = document.getElementById('addForm');
+  const nameInput = document.getElementById('nameInput');
+
+  addForm.addEventListener('submit', function (e) {
+    e.preventDefault();
+    const name = nameInput.value.trim();
+    if (!name) return;
+    const emp = { id: 'e' + Date.now() + Math.floor(Math.random() * 1000), name: name };
+    state.employees.push(emp);
+    selectedEmployee = emp.id;
+    nameInput.value = '';
+    save();
+    render();
+  });
+
+  function removeEmployee(id) {
+    const emp = state.employees.find(e => e.id === id);
+    if (!emp) return;
+    if (!confirm('Remove ' + emp.name + ' and all their availability marks?')) return;
+    state.employees = state.employees.filter(e => e.id !== id);
+    for (const day in state.marks) {
+      delete state.marks[day][id];
+      if (Object.keys(state.marks[day]).length === 0) delete state.marks[day];
+    }
+    if (selectedEmployee === id) {
+      selectedEmployee = state.employees.length ? state.employees[0].id : null;
+    }
+    save();
+    render();
+  }
+
+  function cycleMark(day, empId) {
+    if (!state.marks[day]) state.marks[day] = {};
+    const current = state.marks[day][empId];
+    const idx = STATES.indexOf(current);
+    if (idx === -1) {
+      state.marks[day][empId] = 'avail';
+    } else if (idx === STATES.length - 1) {
+      delete state.marks[day][empId];
+      if (Object.keys(state.marks[day]).length === 0) delete state.marks[day];
+    } else {
+      state.marks[day][empId] = STATES[idx + 1];
+    }
+    save();
+    render();
+  }
+
+  // ── Navigation ──
+  document.getElementById('prevBtn').addEventListener('click', function () {
+    view.setMonth(view.getMonth() - 1); render();
+  });
+  document.getElementById('nextBtn').addEventListener('click', function () {
+    view.setMonth(view.getMonth() + 1); render();
+  });
+  document.getElementById('todayBtn').addEventListener('click', function () {
+    view = new Date(); view.setDate(1); render();
+  });
+
+  // ── Render ──
+  function render() {
+    const y = view.getFullYear(), m = view.getMonth();
+    document.getElementById('monthLabel').textContent = MONTHS[m] + ' ' + y;
+
+    // Employee chips
+    const chips = document.getElementById('employeeChips');
+    chips.innerHTML = '';
+    state.employees.forEach(function (emp) {
+      const chip = document.createElement('div');
+      chip.className = 'chip' + (emp.id === selectedEmployee ? ' active' : '');
+      chip.title = emp.id === selectedEmployee
+        ? emp.name + ' is selected — click calendar days to mark availability'
+        : 'Select ' + emp.name;
+
+      const init = document.createElement('span');
+      init.className = 'initials';
+      init.textContent = initials(emp.name);
+      chip.appendChild(init);
+
+      const label = document.createElement('span');
+      label.textContent = emp.name;
+      chip.appendChild(label);
+
+      const x = document.createElement('span');
+      x.className = 'x';
+      x.textContent = '×';
+      x.title = 'Remove ' + emp.name;
+      x.addEventListener('click', function (e) {
+        e.stopPropagation();
+        removeEmployee(emp.id);
+      });
+      chip.appendChild(x);
+
+      chip.addEventListener('click', function () {
+        selectedEmployee = emp.id;
+        render();
+      });
+      chips.appendChild(chip);
+    });
+
+    // Calendar
+    const cal = document.getElementById('calendar');
+    cal.innerHTML = '';
+    DOW.forEach(function (d) {
+      const el = document.createElement('div');
+      el.className = 'dow';
+      el.textContent = d;
+      cal.appendChild(el);
+    });
+
+    if (state.employees.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'empty-state';
+      empty.textContent = 'Add your first employee above to start tracking availability.';
+      cal.appendChild(empty);
+      return;
+    }
+
+    const firstDow = new Date(y, m, 1).getDay();
+    const daysInMonth = new Date(y, m + 1, 0).getDate();
+    const daysInPrev = new Date(y, m, 0).getDate();
+    const today = new Date();
+    const totalCells = Math.ceil((firstDow + daysInMonth) / 7) * 7;
+
+    for (let i = 0; i < totalCells; i++) {
+      const cell = document.createElement('div');
+      let cy = y, cm = m, cd;
+      if (i < firstDow) {
+        cd = daysInPrev - firstDow + 1 + i;
+        cm = m - 1;
+        if (cm < 0) { cm = 11; cy = y - 1; }
+        cell.className = 'day other-month';
+      } else if (i - firstDow < daysInMonth) {
+        cd = i - firstDow + 1;
+        cell.className = 'day';
+      } else {
+        cd = i - firstDow - daysInMonth + 1;
+        cm = m + 1;
+        if (cm > 11) { cm = 0; cy = y + 1; }
+        cell.className = 'day other-month';
+      }
+
+      if (cy === today.getFullYear() && cm === today.getMonth() && cd === today.getDate()) {
+        cell.classList.add('today');
+      }
+
+      const key = dateKey(cy, cm, cd);
+      const dayMarks = state.marks[key] || {};
+
+      const num = document.createElement('span');
+      num.className = 'daynum';
+      num.textContent = cd;
+      cell.appendChild(num);
+
+      const availCount = state.employees.filter(e => dayMarks[e.id] === 'avail').length;
+      if (availCount > 0) {
+        const count = document.createElement('span');
+        count.className = 'count';
+        count.textContent = availCount + '/' + state.employees.length;
+        count.title = availCount + ' of ' + state.employees.length + ' employees available';
+        cell.appendChild(count);
+      }
+
+      const marks = document.createElement('div');
+      marks.className = 'marks';
+      state.employees.forEach(function (emp) {
+        const s = dayMarks[emp.id];
+        if (!s) return;
+        const mark = document.createElement('div');
+        mark.className = 'mark ' + s;
+        mark.title = emp.name + ': ' + STATE_LABEL[s] + ' — click to change';
+
+        const dot = document.createElement('span');
+        dot.className = 'dot';
+        mark.appendChild(dot);
+
+        const nm = document.createElement('span');
+        nm.className = 'name';
+        nm.textContent = emp.name;
+        mark.appendChild(nm);
+
+        mark.addEventListener('click', function (e) {
+          e.stopPropagation();
+          cycleMark(key, emp.id);
+        });
+        marks.appendChild(mark);
+      });
+      cell.appendChild(marks);
+
+      cell.addEventListener('click', function () {
+        if (!selectedEmployee) return;
+        cycleMark(key, selectedEmployee);
+      });
+
+      cal.appendChild(cell);
+    }
+  }
+
+  render();
+})();
+</script>
+</body>
+</html>
