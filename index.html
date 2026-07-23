@@ -260,6 +260,16 @@
   .mark.partial { color: var(--text); }
   .mark:hover { border-color: var(--text); }
   .mark.wide { width: 100%; justify-content: flex-start; letter-spacing: 0.3px; }
+  .mark.auto { opacity: 0.6; border-style: dashed; }
+
+  .day.short { box-shadow: inset 0 2px 0 var(--danger); }
+  .day.short .count { color: var(--danger); font-weight: 700; }
+
+  /* Usual-week pattern editor */
+  .pat-row { display: flex; align-items: center; gap: 6px; padding: 5px 0; }
+  .pat-row .d { width: 40px; font-size: 11px; color: var(--text-dim); font-weight: 700; letter-spacing: 1px; text-transform: uppercase; flex: none; }
+  .pat-row button { flex: 1; min-height: 40px; font-size: 11px; padding: 4px 2px; color: var(--text-dim); }
+  .pat-row button.on { background: var(--text); color: var(--bg); border-color: var(--text); font-weight: 700; }
 
   .empty-state {
     grid-column: 1 / -1; padding: 48px 20px; text-align: center;
@@ -273,6 +283,7 @@
     .chip { padding: 5px 8px; font-size: 12px; min-height: 36px; gap: 6px; }
     .day { min-height: 76px; padding: 3px; }
     .day .count { display: none; }
+    .day.short .count { display: block; font-size: 9px; }
     .daynum { width: 20px; height: 20px; font-size: 11px; margin-bottom: 2px; }
     .marks { pointer-events: none; gap: 2px; }
     .mark {
@@ -467,6 +478,7 @@
       <div class="viewswitch">
         <button type="button" id="viewMine">My days</button><button type="button" id="viewAll">Everyone</button>
       </div>
+      <button type="button" class="ghost" id="patternBtn" style="display:none">↻ My usual week</button>
       <div class="legend">
         <div class="item"><span class="swatch avail"></span> Available</div>
         <div class="item"><span class="swatch partial"></span> Partial</div>
@@ -500,6 +512,9 @@
     <label class="field" for="setAdmins">Admin Emails (one per line, lowercase)</label>
     <textarea id="setAdmins" rows="3" required></textarea>
     <div class="note">Admins can edit everyone's availability, manage employees, and change these settings. Don't remove your own email.</div>
+    <label class="field" for="setMinStaff">Minimum people available per day (0 = off)</label>
+    <input type="text" id="setMinStaff" inputmode="numeric" pattern="[0-9]*">
+    <div class="note">Days from today onward with fewer available people get a red warning line and count, visible to the whole team. The weekly email also sends admins a staffing heads-up.</div>
     <div id="hideMeBlock">
       <label class="field">My visibility</label>
       <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer">
@@ -514,6 +529,18 @@
       <button type="submit" class="primary">Save</button>
     </div>
   </form>
+</div>
+
+<!-- ═══ Usual week (pattern) modal ═══ -->
+<div class="modal" id="patternModal">
+  <h3>My usual week</h3>
+  <div class="note" style="margin-bottom:8px">Set your normal availability once — it fills every week automatically. Changing a specific day on the calendar always overrides it (dashed badges mean "from my usual week").</div>
+  <div id="patternRows"></div>
+  <div class="form-msg" id="patternMsg"></div>
+  <div class="form-actions">
+    <button type="button" id="patternCancel">Cancel</button>
+    <button type="button" class="primary" id="patternSave">Save</button>
+  </div>
 </div>
 
 <div id="toast"></div>
@@ -580,6 +607,8 @@
   let settings = null;
   let employees = [];
   let marks = {};              // { 'YYYY-MM-DD': { uid: state } }
+  let pubSettings = null;      // settings/public: { minStaff }
+  let unsubPub = null;
   let selectedEmployee = null;
   let viewDate = new Date(); viewDate.setDate(1);
   let unsubEmployees = null, unsubMarks = null;
@@ -625,6 +654,17 @@
   function isActiveEmp(emp) { return emp.active !== false; }
   function isVisibleEmp(emp) { return isActiveEmp(emp) && emp.hidden !== true; }
   function activeEmployees() { return employees.filter(isVisibleEmp); }
+  function patternState(emp, dow) {
+    return (emp.pattern && emp.pattern[String(dow)]) || null;
+  }
+  // Explicit mark wins; otherwise fall back to the person's usual week
+  function effState(emp, dayMarks, dow) {
+    return dayMarks[emp.id] || patternState(emp, dow) || null;
+  }
+  function todayKey() {
+    const t = new Date();
+    return dateKey(t.getFullYear(), t.getMonth(), t.getDate());
+  }
 
   let toastTimer = null;
   function toast(msg) {
@@ -710,6 +750,7 @@
   function cleanupSubs() {
     if (unsubEmployees) { unsubEmployees(); unsubEmployees = null; }
     if (unsubMarks) { unsubMarks(); unsubMarks = null; }
+    if (unsubPub) { unsubPub(); unsubPub = null; }
     closeSheet(); closeModal();
   }
 
@@ -728,6 +769,11 @@
       }
       render();
     }, function () { toast('Lost access to the roster — try signing in again.'); });
+
+    unsubPub = db.doc('settings/public').onSnapshot(function (s) {
+      pubSettings = s.exists ? s.data() : null;
+      render();
+    }, function () { /* not fatal */ });
 
     subscribeMarks();
   }
@@ -856,6 +902,7 @@
   $('settingsBtn').addEventListener('click', function () {
     $('setInvite').value = settings && settings.inviteCode || '';
     $('setAdmins').value = (settings && settings.adminEmails || []).join('\n');
+    $('setMinStaff').value = String((pubSettings && pubSettings.minStaff) || 0);
     const myEmp = employees.find(e => e.id === me.uid);
     $('hideMeBlock').style.display = myEmp ? '' : 'none';
     $('setHideMe').checked = !!(myEmp && myEmp.hidden === true);
@@ -865,10 +912,59 @@
   });
   function closeModal() {
     $('settingsModal').classList.remove('open');
+    $('patternModal').classList.remove('open');
     $('modalOverlay').classList.remove('open');
   }
   $('settingsCancel').addEventListener('click', closeModal);
   $('modalOverlay').addEventListener('click', closeModal);
+
+  // ── Usual week (pattern) editor ──
+  const DOW_FULL = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  let patternDraft = {};
+
+  function renderPatternRows() {
+    const wrap = $('patternRows');
+    wrap.innerHTML = '';
+    for (let dow = 0; dow < 7; dow++) {
+      const row = document.createElement('div');
+      row.className = 'pat-row';
+      const label = document.createElement('span');
+      label.className = 'd';
+      label.textContent = DOW[dow];
+      label.title = DOW_FULL[dow];
+      row.appendChild(label);
+      [[null, '—'], ['avail', 'Avail'], ['partial', 'Partial'], ['unavail', 'Out']].forEach(function (opt) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.textContent = opt[1];
+        const isOn = (patternDraft[String(dow)] || null) === opt[0];
+        if (isOn) btn.classList.add('on');
+        btn.addEventListener('click', function () {
+          if (opt[0] === null) delete patternDraft[String(dow)];
+          else patternDraft[String(dow)] = opt[0];
+          renderPatternRows();
+        });
+        row.appendChild(btn);
+      });
+      wrap.appendChild(row);
+    }
+  }
+
+  $('patternBtn').addEventListener('click', function () {
+    const myEmp = employees.find(e => e.id === me.uid);
+    if (!myEmp) return;
+    patternDraft = Object.assign({}, myEmp.pattern || {});
+    $('patternMsg').textContent = '';
+    renderPatternRows();
+    $('patternModal').classList.add('open');
+    $('modalOverlay').classList.add('open');
+  });
+  $('patternCancel').addEventListener('click', closeModal);
+  $('patternSave').addEventListener('click', function () {
+    db.doc('employees/' + me.uid).update({ pattern: patternDraft })
+      .then(function () { closeModal(); toast('Your usual week is saved.'); })
+      .catch(function () { $('patternMsg').textContent = 'Could not save — try again.'; });
+  });
   $('settingsForm').addEventListener('submit', function (e) {
     e.preventDefault();
     const invite = $('setInvite').value.trim();
@@ -877,7 +973,14 @@
     if (me.email && !admins.includes(me.email.toLowerCase())) {
       if (!confirm('Your own email is not in the admin list — you will lose admin access. Continue?')) return;
     }
-    const writes = [db.doc('settings/company').set({ inviteCode: invite, adminEmails: admins })];
+    const minStaff = parseInt($('setMinStaff').value, 10);
+    if (isNaN(minStaff) || minStaff < 0 || minStaff > 99) {
+      $('settingsMsg').textContent = 'Minimum people must be a number (0 to turn it off).'; return;
+    }
+    const writes = [
+      db.doc('settings/company').set({ inviteCode: invite, adminEmails: admins }),
+      db.doc('settings/public').set({ minStaff: minStaff })
+    ];
     const myEmp = employees.find(e => e.id === me.uid);
     if (myEmp && $('hideMeBlock').style.display !== 'none') {
       const hide = $('setHideMe').checked;
@@ -908,6 +1011,7 @@
   function renderSheet(date) {
     const parts = date.split('-');
     const d = new Date(+parts[0], +parts[1] - 1, +parts[2]);
+    const sheetDow = d.getDay();
     $('sheetTitle').textContent = DOW[d.getDay()] + ', ' + MONTHS[d.getMonth()] + ' ' + d.getDate();
     const wrap = $('sheetRows');
     wrap.innerHTML = '';
@@ -924,7 +1028,10 @@
       $('sheetSub').textContent = 'Tap a name, then pick their status below.';
     } else {
       const n = { avail: 0, partial: 0, unavail: 0 };
-      allActive.forEach(function (e) { if (dayMarks[e.id]) n[dayMarks[e.id]]++; });
+      allActive.forEach(function (e) {
+        const s = effState(e, dayMarks, sheetDow);
+        if (s) n[s]++;
+      });
       $('sheetSub').textContent = 'Pick your status for this day. Team: '
         + n.avail + ' available · ' + n.partial + ' partial · ' + n.unavail + ' out.';
     }
@@ -947,10 +1054,11 @@
       nm.textContent = emp.name + (emp.id === me.uid ? ' (you)' : '');
       row.appendChild(nm);
 
-      const s = dayMarks[emp.id];
+      const explicit = dayMarks[emp.id];
+      const s = explicit || patternState(emp, sheetDow);
       const pill = document.createElement('span');
       pill.className = 'state-pill';
-      pill.textContent = s ? STATE_LABEL[s] : '—';
+      pill.textContent = s ? STATE_LABEL[s] + (explicit ? '' : ' · usual') : '—';
       if (s === 'avail') {
         pill.style.background = empColor(emp);
         pill.style.color = contrastText(empColor(emp));
@@ -1207,6 +1315,7 @@
     const mineOnly = effectiveViewMode() === 'mine';
     const hasOwnActive = me && actEmps.some(e => e.id === me.uid);
     $('viewMine').parentElement.style.display = hasOwnActive ? '' : 'none';
+    $('patternBtn').style.display = hasOwnActive ? '' : 'none';
     $('viewMine').classList.toggle('on', mineOnly);
     $('viewAll').classList.toggle('on', !mineOnly);
     const calEmps = mineOnly ? actEmps.filter(e => e.id === me.uid) : actEmps;
@@ -1264,22 +1373,29 @@
       num.textContent = cd;
       cell.appendChild(num);
 
-      const availCount = actEmps.filter(e => dayMarks[e.id] === 'avail').length;
-      if (availCount > 0) {
+      const cellDow = i % 7;
+      const availCount = actEmps.filter(e => effState(e, dayMarks, cellDow) === 'avail').length;
+      const minStaff = (pubSettings && Number(pubSettings.minStaff)) || 0;
+      const short = minStaff > 0 && key >= todayKey() && availCount < minStaff;
+      if (short) cell.classList.add('short');
+      if (availCount > 0 || short) {
         const count = document.createElement('span');
         count.className = 'count';
         count.textContent = availCount + '/' + actEmps.length;
+        if (short) count.title = 'Understaffed: fewer than ' + minStaff + ' people available';
         cell.appendChild(count);
       }
 
       const marksEl = document.createElement('div');
       marksEl.className = 'marks';
       calEmps.forEach(function (emp) {
-        const s = dayMarks[emp.id];
+        const explicit = dayMarks[emp.id];
+        const s = explicit || patternState(emp, cellDow);
         if (!s) return;
+        const auto = !explicit;
         const mark = document.createElement('div');
-        mark.className = 'mark ' + s + (mineOnly ? ' wide' : '');
-        mark.title = emp.name + ': ' + STATE_LABEL[s];
+        mark.className = 'mark ' + s + (mineOnly ? ' wide' : '') + (auto ? ' auto' : '');
+        mark.title = emp.name + ': ' + STATE_LABEL[s] + (auto ? ' (usual week)' : '');
 
         const dot = document.createElement('span');
         dot.className = 'dot';

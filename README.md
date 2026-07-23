@@ -20,6 +20,8 @@ A black-and-white, dark-mode availability calendar where each employee signs in 
 - **Per-employee colors** — auto-assigned, changeable via a palette or any custom color
 - **Three availability states** per day, in the employee's color: Available (solid), Partial (striped), Unavailable (outlined, struck through)
 - **Daily headcount** — each day shows how many people are available
+- **Usual week patterns** — everyone can set their normal weekly availability once ("My usual week"); it auto-fills the calendar (shown dashed) and specific-day changes always override it
+- **Understaffing warnings** — admins set a minimum crew per day; future days below it get a red warning line and count for the whole team, and admins get an email heads-up with the weekly reminders
 - **Phone app** — add to home screen (PWA) with a full-screen black UI, big touch targets, and a tap-to-edit day sheet
 - **Black & white dark mode** throughout; color is used only to identify people
 

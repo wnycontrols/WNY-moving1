@@ -21,6 +21,12 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // Non-secret shared settings (e.g. minimum crew per day). Team can read.
+    match /settings/public {
+      allow read: if isEmployee() || isAdmin();
+      allow write: if isAdmin();
+    }
+
     // Employee roster. Anyone on the team can see it; you can only create
     // your own profile, and only with the correct invite code.
     match /employees/{uid} {
@@ -33,7 +39,7 @@ service cloud.firestore {
         && request.resource.data.name.size() <= 60;
       allow update: if isAdmin()
         || (request.auth.uid == uid
-            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'color']));
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'color', 'pattern']));
       allow delete: if isAdmin();
     }
 

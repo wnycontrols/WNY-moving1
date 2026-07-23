@@ -65,12 +65,16 @@ async function listEmployees() {
     const data = await fsGet(FS + '/employees?pageSize=300' + (pageToken ? '&pageToken=' + pageToken : ''));
     for (const doc of data.documents || []) {
       const f = doc.fields || {};
+      const pattern = {};
+      const pf = f.pattern && f.pattern.mapValue && f.pattern.mapValue.fields;
+      if (pf) for (const k of Object.keys(pf)) pattern[k] = fieldVal(pf[k]);
       out.push({
         uid: doc.name.split('/').pop(),
         name: fieldVal(f.name) || 'there',
         email: fieldVal(f.email),
         active: fieldVal(f.active) !== false,
         hidden: fieldVal(f.hidden) === true,
+        pattern,
       });
     }
     pageToken = data.nextPageToken || '';
@@ -82,8 +86,8 @@ function dateKey(d) {
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 }
 
-async function countUpcomingMarks() {
-  // Marks per employee over the next 14 days.
+async function getUpcomingMarks() {
+  // Explicit marks per employee over the next 14 days: { uid: { date: state } }
   const start = new Date();
   const end = new Date();
   end.setDate(end.getDate() + 13);
@@ -108,19 +112,53 @@ async function countUpcomingMarks() {
   });
   if (!res.ok) throw new Error('availability query failed: ' + res.status + ' ' + (await res.text()));
   const rows = await res.json();
-  const counts = {};
+  const byUid = {};
   for (const row of rows) {
     if (!row.document) continue;
-    const uid = fieldVal(row.document.fields.uid);
-    if (uid) counts[uid] = (counts[uid] || 0) + 1;
+    const f = row.document.fields;
+    const uid = fieldVal(f.uid), date = fieldVal(f.date), state = fieldVal(f.state);
+    if (!uid || !date) continue;
+    if (!byUid[uid]) byUid[uid] = {};
+    byUid[uid][date] = state;
   }
-  return counts;
+  return byUid;
+}
+
+function next14Days() {
+  const days = [];
+  for (let i = 0; i < 14; i++) {
+    const d = new Date();
+    d.setDate(d.getDate() + i);
+    days.push({ key: dateKey(d), dow: String(d.getDay()), label: d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) });
+  }
+  return days;
+}
+
+// Explicit mark wins; otherwise the person's usual-week pattern applies
+function effectiveState(emp, marksByUid, day) {
+  const explicit = marksByUid[emp.uid] && marksByUid[emp.uid][day.key];
+  return explicit || emp.pattern[day.dow] || null;
+}
+
+async function getSettingsDoc(name) {
+  const res = await fetch(FS + '/settings/' + name, { headers: { Authorization: 'Bearer ' + TOKEN } });
+  if (!res.ok) return {};
+  const doc = await res.json();
+  const out = {};
+  for (const k of Object.keys(doc.fields || {})) {
+    const f = doc.fields[k];
+    if ('arrayValue' in f) out[k] = (f.arrayValue.values || []).map(fieldVal);
+    else out[k] = fieldVal(f);
+  }
+  return out;
 }
 
 function emailBody(name, filledCount) {
   const status = filledCount === 0
     ? 'You haven’t filled in any days for the next two weeks yet.'
-    : 'You’ve filled in ' + filledCount + ' day' + (filledCount === 1 ? '' : 's') + ' for the next two weeks — please double-check they’re still right.';
+    : filledCount >= 14
+      ? 'Your next two weeks are covered (including your usual week) — please double-check they’re still right.'
+      : 'You’ve got ' + filledCount + ' of the next 14 days covered — please fill in the rest and double-check the others.';
   return `
   <div style="background:#000;color:#fff;padding:32px 24px;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif">
     <div style="max-width:440px;margin:0 auto;border:1px solid #2a2a2a;padding:28px 24px;background:#0d0d0d">
@@ -141,13 +179,31 @@ function emailBody(name, filledCount) {
 // ── Main ──
 TOKEN = await getAccessToken();
 const employees = (await listEmployees()).filter(e => e.active && !e.hidden && e.email);
-const counts = await countUpcomingMarks();
+const marksByUid = await getUpcomingMarks();
+const days = next14Days();
+
+// Days filled per employee (explicit marks or usual-week pattern)
+const counts = {};
+for (const e of employees) {
+  counts[e.uid] = days.filter(d => effectiveState(e, marksByUid, d)).length;
+}
+
+// Staffing check: days below the minimum
+const pub = await getSettingsDoc('public');
+const company = await getSettingsDoc('company');
+const minStaff = Number(pub.minStaff) || 0;
+const shortDays = minStaff > 0
+  ? days.map(d => ({ ...d, avail: employees.filter(e => effectiveState(e, marksByUid, d) === 'avail').length }))
+        .filter(d => d.avail < minStaff)
+  : [];
 console.log('Active employees with an email address: ' + employees.length);
+if (minStaff > 0) console.log('Staffing check: ' + shortDays.length + ' of the next 14 days below minimum (' + minStaff + ')');
 
 if (DRY_RUN) {
   for (const e of employees) {
-    console.log('[dry-run] would email 1 person (upcoming days filled: ' + (counts[e.uid] || 0) + ')');
+    console.log('[dry-run] would email 1 person (upcoming days covered: ' + (counts[e.uid] || 0) + '/14)');
   }
+  if (shortDays.length) console.log('[dry-run] would send staffing heads-up to ' + (company.adminEmails || []).length + ' admin(s)');
   process.exit(0);
 }
 
@@ -176,4 +232,39 @@ for (const e of employees) {
   await new Promise(r => setTimeout(r, 1500));
 }
 console.log('Reminders sent: ' + sent + (failed ? ' (failed: ' + failed + ')' : ''));
+
+// Staffing heads-up for admins
+if (shortDays.length > 0 && (company.adminEmails || []).length > 0) {
+  const rows = shortDays.map(d =>
+    '<tr><td style="padding:6px 14px 6px 0;color:#fff;font-size:14px">' + d.label + '</td>' +
+    '<td style="padding:6px 0;color:#ff5252;font-size:14px;font-weight:700">' + d.avail + ' of ' + employees.length + ' available (need ' + minStaff + ')</td></tr>'
+  ).join('');
+  const html = `
+  <div style="background:#000;color:#fff;padding:32px 24px;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif">
+    <div style="max-width:460px;margin:0 auto;border:1px solid #2a2a2a;padding:28px 24px;background:#0d0d0d">
+      <div style="display:inline-block;border:2px solid #fff;padding:8px 10px;font-weight:800;letter-spacing:1px;font-size:14px;color:#fff">WNY</div>
+      <h2 style="margin:18px 0 6px;font-size:18px;color:#fff">Staffing heads-up</h2>
+      <p style="margin:0 0 12px;font-size:14px;line-height:1.6;color:#9a9a9a">
+        These upcoming days are below your minimum of ${minStaff} available:
+      </p>
+      <table style="border-collapse:collapse">${rows}</table>
+      <a href="${SITE_URL}" style="display:inline-block;margin:18px 0 6px;background:#fff;color:#000;text-decoration:none;font-weight:700;font-size:14px;padding:12px 22px">Open the calendar</a>
+    </div>
+  </div>`;
+  let adminSent = 0;
+  for (const adminEmail of company.adminEmails) {
+    try {
+      await transport.sendMail({
+        from: '"WNY Moving" <' + process.env.GMAIL_USER + '>',
+        to: adminEmail,
+        subject: 'WNY Moving — ' + shortDays.length + ' understaffed day' + (shortDays.length === 1 ? '' : 's') + ' coming up',
+        html,
+      });
+      adminSent++;
+    } catch (err) { console.error('staffing email failed for one admin: ' + err.message); }
+    await new Promise(r => setTimeout(r, 1500));
+  }
+  console.log('Staffing heads-up sent to ' + adminSent + ' admin(s)');
+}
+
 if (failed > 0 && sent === 0) process.exit(1);
