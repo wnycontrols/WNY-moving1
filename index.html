@@ -1353,14 +1353,39 @@
       optNone.value = '';
       optNone.textContent = '★ No lead';
       leadSel.appendChild(optNone);
+      const memberGroup = document.createElement('optgroup');
+      memberGroup.label = 'Crew members';
       members.forEach(function (uid) {
         const o = document.createElement('option');
         o.value = uid;
         o.textContent = '★ ' + byId[uid].name;
-        leadSel.appendChild(o);
+        memberGroup.appendChild(o);
       });
+      if (members.length) leadSel.appendChild(memberGroup);
+      // Admin accounts are always lead candidates; picking one adds them to the crew
+      const adminEmailsList = (settings && settings.adminEmails || []).map(x => String(x).toLowerCase());
+      const adminCandidates = employees.filter(e =>
+        isActiveEmp(e) && e.email && adminEmailsList.includes(e.email.toLowerCase()) && !members.includes(e.id));
+      if (adminCandidates.length) {
+        const adminGroup = document.createElement('optgroup');
+        adminGroup.label = 'Admins (joins the crew)';
+        adminCandidates.forEach(function (emp) {
+          const o = document.createElement('option');
+          o.value = emp.id;
+          o.textContent = '★ ' + emp.name;
+          adminGroup.appendChild(o);
+        });
+        leadSel.appendChild(adminGroup);
+      }
       leadSel.value = crew.lead && members.includes(crew.lead) ? crew.lead : '';
-      leadSel.addEventListener('change', function () { updateCrew(crew.id, { lead: leadSel.value || null }); });
+      leadSel.addEventListener('change', function () {
+        const uid = leadSel.value || null;
+        if (uid && !members.includes(uid)) {
+          updateCrew(crew.id, { lead: uid, members: firebase.firestore.FieldValue.arrayUnion(uid) });
+        } else {
+          updateCrew(crew.id, { lead: uid });
+        }
+      });
       head.appendChild(leadSel);
 
       const spacer = document.createElement('span');
