@@ -804,6 +804,8 @@
   let hoursOpenDays = null;    // Set of expanded day keys (null = default)
   let dayEnded = false;        // the shown crews-tab day has been ended
   let dayEndedAt = null;
+  let workers = [];            // clock-only people without accounts
+  let unsubWorkers = null;
   let pendingProfile = null;   // { name, inviteCode } captured at signup
   let showInactive = false;    // admin: reveal the inactive-employees section
   const COLLAPSE_KEY = 'wny-team-collapsed';
@@ -944,6 +946,7 @@
     if (unsubClock) { unsubClock(); unsubClock = null; }
     if (unsubHoursCrews) { unsubHoursCrews(); unsubHoursCrews = null; }
     if (unsubHoursClocks) { unsubHoursClocks(); unsubHoursClocks = null; }
+    if (unsubWorkers) { unsubWorkers(); unsubWorkers = null; }
     closeSheet(); closeModal();
   }
 
@@ -955,6 +958,12 @@
     if (isAdmin) {
       if (!crewDate) crewDate = todayKey();
       subscribeCrews();
+      unsubWorkers = db.collection('workers').onSnapshot(function (s) {
+        workers = s.docs.map(d => Object.assign({ id: d.id, worker: true }, d.data()));
+        workers.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+        renderCrews();
+        renderHours();
+      }, function () { /* not fatal */ });
     }
 
     unsubEmployees = db.collection('employees').onSnapshot(function (snap) {
@@ -1470,11 +1479,11 @@
     const dayMarks = marks[crewDate] || {};
     // Crew picker includes hidden admin profiles — they can run or lead a
     // crew while staying off the availability calendar.
-    const roster = employees.filter(isActiveEmp);
+    const roster = employees.filter(isActiveEmp).concat(workers);
     const assigned = new Set();
     crews.forEach(c => (c.members || []).forEach(uid => assigned.add(uid)));
     const byId = {};
-    employees.forEach(e => { byId[e.id] = e; });
+    employees.concat(workers).forEach(e => { byId[e.id] = e; });
 
     const list = $('crewsList');
     list.innerHTML = '';
@@ -1693,7 +1702,10 @@
           nm.textContent = emp.name;
           rowA.appendChild(nm);
           const st = document.createElement('span');
-          if (emp.hidden === true) {
+          if (emp.worker === true) {
+            st.className = 'astate';
+            st.textContent = 'clock only';
+          } else if (emp.hidden === true) {
             st.className = 'astate';
             st.textContent = 'admin · off calendar';
           } else {
@@ -1706,8 +1718,53 @@
             openAddFor = null;
             updateCrew(crew.id, { members: firebase.firestore.FieldValue.arrayUnion(emp.id) });
           });
+          if (emp.worker === true) {
+            const delW = document.createElement('span');
+            delW.textContent = '×';
+            delW.title = 'Delete ' + emp.name + ' (clock-only worker)';
+            delW.style.cssText = 'color:var(--text-faint);padding:4px 6px;font-size:14px';
+            delW.addEventListener('click', function (e) {
+              e.stopPropagation();
+              if (confirm('Delete ' + emp.name + '? Their saved hours are kept in history.')) {
+                db.doc('workers/' + emp.id).delete().catch(function () { toast('Could not delete.'); });
+              }
+            });
+            rowA.appendChild(delW);
+          }
           pop.appendChild(rowA);
         });
+
+        // New clock-only worker (no account needed)
+        const addNew = document.createElement('div');
+        addNew.className = 'arow';
+        addNew.style.cursor = 'default';
+        const ni = document.createElement('input');
+        ni.type = 'text';
+        ni.placeholder = 'New name (no account)…';
+        ni.maxLength = 40;
+        ni.style.cssText = 'flex:1;min-width:0;padding:8px;font-size:14px;min-height:36px';
+        const nb = document.createElement('button');
+        nb.type = 'button';
+        nb.className = 'primary';
+        nb.textContent = 'Add';
+        nb.style.cssText = 'font-size:12px;padding:6px 12px;min-height:36px';
+        function addWorker() {
+          const name = ni.value.trim();
+          if (!name) return;
+          db.collection('workers').add({ name: name, color: colorForUid(name), created: Date.now() })
+            .then(function (ref) {
+              openAddFor = null;
+              updateCrew(crew.id, { members: firebase.firestore.FieldValue.arrayUnion(ref.id) });
+              toast(name + ' added (clock only — no account).');
+            })
+            .catch(function () { toast('Could not add ' + name + '.'); });
+        }
+        nb.addEventListener('click', addWorker);
+        ni.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); addWorker(); } });
+        addNew.appendChild(ni);
+        addNew.appendChild(nb);
+        pop.appendChild(addNew);
+
         addWrap.appendChild(pop);
       }
       card.appendChild(addWrap);
@@ -1812,7 +1869,7 @@
     $('hoursWeekLabel').textContent = fmt(r.startD) + ' – ' + fmt(r.endD);
 
     const byId = {};
-    employees.forEach(e => { byId[e.id] = e; });
+    employees.concat(workers).forEach(e => { byId[e.id] = e; });
 
     // Filter dropdown: Everyone / crew names in range / individual people
     const sel = $('hoursFilter');
@@ -1835,10 +1892,10 @@
     }
     const gP = document.createElement('optgroup');
     gP.label = 'Individual';
-    employees.filter(isActiveEmp).sort((a, b) => a.name.localeCompare(b.name)).forEach(function (e) {
+    employees.filter(isActiveEmp).concat(workers).sort((a, b) => a.name.localeCompare(b.name)).forEach(function (e) {
       const o = document.createElement('option');
       o.value = 'uid:' + e.id;
-      o.textContent = e.name;
+      o.textContent = e.name + (e.worker ? ' (clock only)' : '');
       gP.appendChild(o);
     });
     sel.appendChild(gP);
