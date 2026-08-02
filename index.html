@@ -181,6 +181,7 @@
   .member-row .lead-star { color: var(--text); font-size: 13px; }
   .member-row .mstatus { flex: 1; text-align: right; font-size: 11px; color: var(--text-dim); line-height: 1.5; min-width: 0; }
   .member-row .mstatus .live { color: #69f0ae; font-weight: 700; }
+  .member-row .mstatus .brk { color: #ffd600; font-weight: 700; }
   .member-row button { font-size: 11px; padding: 6px 10px; min-height: 36px; flex: none; }
   .member-row .rm { border: none; color: var(--text-faint); font-size: 15px; min-height: 36px; padding: 4px 8px; }
   .member-row .rm:hover { background: transparent; color: var(--danger); }
@@ -1257,7 +1258,7 @@
     }, function () { toast('Could not load crews.'); });
     unsubClock = db.collection('timeclock').where('date', '==', crewDate).onSnapshot(function (s) {
       timeclock = {};
-      s.forEach(function (d) { const x = d.data(); timeclock[x.uid] = x.sessions || []; });
+      s.forEach(function (d) { const x = d.data(); timeclock[x.uid] = x; });
       renderCrews();
     }, function () { /* not fatal */ });
   }
@@ -1278,9 +1279,16 @@
       .catch(function () { toast('Could not create crew.'); });
   });
 
-  function openSession(uid) { return (timeclock[uid] || []).find(s => !s.out) || null; }
+  function clockDoc(uid) { return timeclock[uid] || { sessions: [], onBreak: false, breakStart: null, breakMs: 0 }; }
+  function sessionsOf(uid) { return clockDoc(uid).sessions || []; }
+  function openSession(uid) { return sessionsOf(uid).find(s => !s.out) || null; }
+  function onBreak(uid) { return clockDoc(uid).onBreak === true; }
   function totalWorkedMs(uid) {
-    return (timeclock[uid] || []).reduce((sum, s) => sum + ((s.out || Date.now()) - s.in), 0);
+    return sessionsOf(uid).reduce((sum, s) => sum + ((s.out || Date.now()) - s.in), 0);
+  }
+  function totalBreakMs(uid) {
+    const d = clockDoc(uid);
+    return (d.breakMs || 0) + (d.onBreak && d.breakStart ? Date.now() - d.breakStart : 0);
   }
   function fmtClock(ms) {
     return new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
@@ -1289,18 +1297,40 @@
     const m = Math.floor(ms / 60000);
     return Math.floor(m / 60) + 'h ' + String(m % 60).padStart(2, '0') + 'm';
   }
-  function writeSessions(uid, sessions) {
-    db.collection('timeclock').doc(uid + '_' + crewDate).set({ uid: uid, date: crewDate, sessions: sessions })
+  function writeClock(uid, doc) {
+    db.collection('timeclock').doc(uid + '_' + crewDate).set(Object.assign({ uid: uid, date: crewDate }, doc))
       .catch(function () { toast('Time clock change not saved.'); });
   }
   function clockIn(uid) {
+    if (onBreak(uid)) { endBreak(uid); return; }
     if (openSession(uid)) return;
-    writeSessions(uid, (timeclock[uid] || []).concat([{ in: Date.now(), out: null }]));
+    const d = clockDoc(uid);
+    writeClock(uid, {
+      sessions: sessionsOf(uid).concat([{ in: Date.now(), out: null }]),
+      onBreak: false, breakStart: null, breakMs: d.breakMs || 0
+    });
   }
   function clockOut(uid) {
-    const sessions = (timeclock[uid] || []).map(s => s.out ? s : { in: s.in, out: Date.now() });
-    if (!sessions.length) return;
-    writeSessions(uid, sessions);
+    const d = clockDoc(uid);
+    const sessions = sessionsOf(uid).map(s => s.out ? s : { in: s.in, out: Date.now() });
+    if (!sessions.length && !d.onBreak) return;
+    // Clocking out during a break: the day ended when the break started.
+    writeClock(uid, { sessions: sessions, onBreak: false, breakStart: null, breakMs: d.breakMs || 0 });
+  }
+  function startBreak(uid) {
+    if (!openSession(uid) || onBreak(uid)) return;
+    const d = clockDoc(uid);
+    const sessions = sessionsOf(uid).map(s => s.out ? s : { in: s.in, out: Date.now() });
+    writeClock(uid, { sessions: sessions, onBreak: true, breakStart: Date.now(), breakMs: d.breakMs || 0 });
+  }
+  function endBreak(uid) {
+    const d = clockDoc(uid);
+    if (!d.onBreak) return;
+    writeClock(uid, {
+      sessions: sessionsOf(uid).concat([{ in: Date.now(), out: null }]),
+      onBreak: false, breakStart: null,
+      breakMs: (d.breakMs || 0) + (d.breakStart ? Date.now() - d.breakStart : 0)
+    });
   }
 
   function updateCrew(id, fields) {
@@ -1432,27 +1462,49 @@
         const status = document.createElement('span');
         status.className = 'mstatus';
         const open = openSession(uid);
+        const brk = onBreak(uid);
         const total = totalWorkedMs(uid);
-        if (open) {
-          status.innerHTML = '<span class="live">● On the clock</span><br>in ' + fmtClock(open.in) + ' · ' + fmtDur(total);
+        const breakTotal = totalBreakMs(uid);
+        const breakNote = breakTotal > 0 ? ' · break ' + fmtDur(breakTotal) : '';
+        if (brk) {
+          const d = clockDoc(uid);
+          status.innerHTML = '<span class="brk">⏸ On break</span><br>since ' + fmtClock(d.breakStart) + ' · worked ' + fmtDur(total);
+        } else if (open) {
+          status.innerHTML = '<span class="live">● On the clock</span><br>in ' + fmtClock(open.in) + ' · ' + fmtDur(total) + breakNote;
         } else if (total > 0) {
-          const last = (timeclock[uid] || []).filter(s => s.out).pop();
-          status.innerHTML = fmtDur(total) + ' today<br>out ' + (last ? fmtClock(last.out) : '');
+          const last = sessionsOf(uid).filter(s => s.out).pop();
+          status.innerHTML = fmtDur(total) + ' today' + breakNote + '<br>out ' + (last ? fmtClock(last.out) : '');
         } else {
           status.textContent = 'Not clocked in';
         }
         row.appendChild(status);
 
-        const btn = document.createElement('button');
-        if (open) {
-          btn.textContent = 'Clock out';
-          btn.addEventListener('click', function () { clockOut(uid); });
+        if (brk) {
+          const endB = document.createElement('button');
+          endB.className = 'primary';
+          endB.textContent = 'End break';
+          endB.addEventListener('click', function () { endBreak(uid); });
+          row.appendChild(endB);
+          const outB = document.createElement('button');
+          outB.textContent = 'Clock out';
+          outB.addEventListener('click', function () { clockOut(uid); });
+          row.appendChild(outB);
+        } else if (open) {
+          const brkB = document.createElement('button');
+          brkB.textContent = 'Break';
+          brkB.addEventListener('click', function () { startBreak(uid); });
+          row.appendChild(brkB);
+          const outB = document.createElement('button');
+          outB.textContent = 'Clock out';
+          outB.addEventListener('click', function () { clockOut(uid); });
+          row.appendChild(outB);
         } else {
+          const btn = document.createElement('button');
           btn.textContent = total > 0 ? 'Clock back in' : 'Clock in';
           btn.className = 'primary';
           btn.addEventListener('click', function () { clockIn(uid); });
+          row.appendChild(btn);
         }
-        row.appendChild(btn);
 
         const rm = document.createElement('button');
         rm.className = 'rm';
@@ -1533,8 +1585,8 @@
       // Crew-wide clock actions
       const actions = document.createElement('div');
       actions.className = 'crew-actions';
-      const notIn = members.filter(uid => !openSession(uid));
-      const onClock = members.filter(uid => openSession(uid));
+      const notIn = members.filter(uid => !openSession(uid) && !onBreak(uid));
+      const onClock = members.filter(uid => openSession(uid) || onBreak(uid));
       const inAll = document.createElement('button');
       inAll.className = 'primary';
       inAll.textContent = '▶ Clock in crew' + (notIn.length && members.length ? ' (' + notIn.length + ')' : '');
