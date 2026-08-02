@@ -54,6 +54,14 @@ service cloud.firestore {
       allow delete: if isAdmin() || (isEmployee() && resource.data.uid == request.auth.uid);
     }
 
+    // Daily crew assignments and the time clock: admin-only.
+    match /crews/{id} {
+      allow read, write: if isAdmin();
+    }
+    match /timeclock/{id} {
+      allow read, write: if isAdmin();
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }
