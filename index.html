@@ -1314,7 +1314,9 @@
     $('crewDayLabel').textContent = DOW[d.getDay()] + ', ' + MONTHS[d.getMonth()] + ' ' + d.getDate();
     const dow = d.getDay();
     const dayMarks = marks[crewDate] || {};
-    const roster = activeEmployees();
+    // Crew picker includes hidden admin profiles — they can run or lead a
+    // crew while staying off the availability calendar.
+    const roster = employees.filter(isActiveEmp);
     const assigned = new Set();
     crews.forEach(c => (c.members || []).forEach(uid => assigned.add(uid)));
     const byId = {};
@@ -1460,10 +1462,9 @@
         const candidates = roster.filter(e => !assigned.has(e.id));
         // People marked available first, then partial, then the rest
         const rank = { avail: 0, partial: 1 };
+        const rankOf = e => e.hidden === true ? 3 : (rank[effState(e, dayMarks, dow)] ?? 2);
         candidates.sort(function (a, b) {
-          const ra = rank[effState(a, dayMarks, dow)] ?? 2;
-          const rb = rank[effState(b, dayMarks, dow)] ?? 2;
-          return ra - rb || a.name.localeCompare(b.name);
+          return rankOf(a) - rankOf(b) || a.name.localeCompare(b.name);
         });
         if (!candidates.length) {
           const em = document.createElement('div');
@@ -1485,9 +1486,14 @@
           nm.textContent = emp.name;
           rowA.appendChild(nm);
           const st = document.createElement('span');
-          const s = effState(emp, dayMarks, dow);
-          st.className = 'astate' + (s ? ' ' + s : '');
-          st.textContent = s ? STATE_LABEL[s] : 'no status';
+          if (emp.hidden === true) {
+            st.className = 'astate';
+            st.textContent = 'admin · off calendar';
+          } else {
+            const s = effState(emp, dayMarks, dow);
+            st.className = 'astate' + (s ? ' ' + s : '');
+            st.textContent = s ? STATE_LABEL[s] : 'no status';
+          }
           rowA.appendChild(st);
           rowA.addEventListener('click', function () {
             openAddFor = null;
