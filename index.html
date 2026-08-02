@@ -212,6 +212,14 @@
   .add-pop .empty { padding: 14px; font-size: 12px; color: var(--text-faint); }
 
   .crew-summary { font-size: 12px; color: var(--text-faint); margin: 4px 0 14px; }
+  .crews-footer { display: flex; gap: 10px; flex-wrap: wrap; }
+  .endday-banner {
+    border: 1px solid var(--border-strong); background: var(--panel);
+    padding: 12px 14px; margin-bottom: 14px;
+    display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap;
+    font-size: 13px; color: var(--text-dim);
+  }
+  .endday-banner .done { color: var(--text); font-weight: 700; }
 
   /* ── Hours history ── */
   .hoursbar { display: flex; gap: 10px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
@@ -634,8 +642,15 @@
       <button id="crewTodayBtn">Today</button>
     </div>
     <div class="hint">Build crews from your available people, pick a lead (★), then clock the whole crew in with one tap. Clock people out individually as they leave — hours total up automatically.</div>
+    <div class="endday-banner" id="dayEndedBanner" style="display:none">
+      <span id="dayEndedText"></span>
+      <button type="button" id="reopenDayBtn">Reopen day</button>
+    </div>
     <div id="crewsList"></div>
-    <button type="button" class="primary" id="addCrewBtn">+ New crew</button>
+    <div class="crews-footer">
+      <button type="button" class="primary" id="addCrewBtn">+ New crew</button>
+      <button type="button" id="endDayBtn">⏹ End day</button>
+    </div>
   </main>
 
   <main id="hoursMain" style="display:none">
@@ -787,6 +802,8 @@
   let unsubHoursCrews = null, unsubHoursClocks = null;
   let hoursFilterVal = 'all';  // 'all' | 'crew:<name>' | 'uid:<uid>'
   let hoursOpenDays = null;    // Set of expanded day keys (null = default)
+  let dayEnded = false;        // the shown crews-tab day has been ended
+  let dayEndedAt = null;
   let pendingProfile = null;   // { name, inviteCode } captured at signup
   let showInactive = false;    // admin: reveal the inactive-employees section
   const COLLAPSE_KEY = 'wny-team-collapsed';
@@ -1331,7 +1348,11 @@
     if (unsubCrews) unsubCrews();
     if (unsubClock) unsubClock();
     unsubCrews = db.collection('crews').where('date', '==', crewDate).onSnapshot(function (s) {
-      crews = s.docs.map(d => Object.assign({ id: d.id }, d.data()));
+      const docs = s.docs.map(d => Object.assign({ id: d.id }, d.data()));
+      const endMarker = docs.find(d => d.ended === true);
+      dayEnded = !!endMarker;
+      dayEndedAt = endMarker ? endMarker.endedAt : null;
+      crews = docs.filter(d => d.ended !== true);
       crews.sort((a, b) => (a.created || 0) - (b.created || 0));
       renderCrews();
     }, function () { toast('Could not load crews.'); });
@@ -1354,8 +1375,26 @@
   $('crewNextBtn').addEventListener('click', function () { shiftCrewDate(1); });
   $('crewTodayBtn').addEventListener('click', function () { crewDate = todayKey(); openAddFor = null; subscribeCrews(); renderCrews(); });
   $('addCrewBtn').addEventListener('click', function () {
+    if (dayEnded) { toast('This day is ended — reopen it to make changes.'); return; }
     db.collection('crews').add({ date: crewDate, name: 'Crew ' + (crews.length + 1), lead: null, members: [], created: Date.now() })
       .catch(function () { toast('Could not create crew.'); });
+  });
+
+  $('endDayBtn').addEventListener('click', function () {
+    const stillOn = Object.keys(timeclock).filter(uid => openSession(uid) || onBreak(uid));
+    if (!confirm('End the day? ' + (stillOn.length
+      ? stillOn.length + ' ' + (stillOn.length === 1 ? 'person' : 'people') + ' still on the clock will be clocked out.'
+      : 'The time clock locks until you reopen the day.'))) return;
+    stillOn.forEach(clockOut);
+    db.collection('crews').doc('end_' + crewDate).set({ date: crewDate, ended: true, endedAt: Date.now() })
+      .then(function () { toast('Day ended — everyone is clocked out.'); })
+      .catch(function () { toast('Could not end the day.'); });
+  });
+
+  $('reopenDayBtn').addEventListener('click', function () {
+    db.collection('crews').doc('end_' + crewDate).delete()
+      .then(function () { toast('Day reopened.'); })
+      .catch(function () { toast('Could not reopen the day.'); });
   });
 
   function clockDoc(uid) { return timeclock[uid] || { sessions: [], onBreak: false, breakStart: null, breakMs: 0 }; }
@@ -1421,6 +1460,12 @@
     const p = crewDate.split('-');
     const d = new Date(+p[0], +p[1] - 1, +p[2]);
     $('crewDayLabel').textContent = DOW[d.getDay()] + ', ' + MONTHS[d.getMonth()] + ' ' + d.getDate();
+
+    $('dayEndedBanner').style.display = dayEnded ? '' : 'none';
+    if (dayEnded) {
+      $('dayEndedText').innerHTML = '<span class="done">✓ Day ended' + (dayEndedAt ? ' at ' + fmtClock(dayEndedAt) : '') + '</span> — everyone is clocked out. Tomorrow starts fresh automatically.';
+    }
+    $('endDayBtn').style.display = dayEnded ? 'none' : '';
     const dow = d.getDay();
     const dayMarks = marks[crewDate] || {};
     // Crew picker includes hidden admin profiles — they can run or lead a
@@ -1506,7 +1551,8 @@
       del.textContent = '×';
       del.title = 'Delete this crew (time clock entries are kept)';
       del.addEventListener('click', function () {
-        if (confirm('Delete ' + (crew.name || 'this crew') + ' for this day? Clocked hours are kept.')) {
+        if (confirm('Delete ' + (crew.name || 'this crew') + ' for this day? Anyone on the clock is clocked out; hours are kept.')) {
+          members.filter(uid => openSession(uid) || onBreak(uid)).forEach(clockOut);
           db.doc('crews/' + crew.id).delete().catch(function () { toast('Could not delete crew.'); });
         }
       });
@@ -1558,7 +1604,11 @@
         }
         row.appendChild(status);
 
-        if (brk) {
+        if (dayEnded) {
+          // Day is closed: totals only, no clock controls
+          if (total > 0) status.innerHTML = fmtDur(total) + ' today' + breakNote + '<br>day ended';
+          else status.textContent = 'No hours · day ended';
+        } else if (brk) {
           const endB = document.createElement('button');
           endB.className = 'primary';
           endB.textContent = 'End break';
@@ -1599,6 +1649,7 @@
       });
 
       // Add-person dropdown
+      if (!dayEnded) {
       const addWrap = document.createElement('div');
       addWrap.className = 'add-member';
       const addBtn = document.createElement('button');
@@ -1680,6 +1731,7 @@
       outAll.addEventListener('click', function () { onClock.forEach(clockOut); });
       actions.appendChild(outAll);
       card.appendChild(actions);
+      }
 
       list.appendChild(card);
     });
@@ -1704,7 +1756,7 @@
     unsubHoursCrews = db.collection('crews')
       .where('date', '>=', r.start).where('date', '<=', r.end)
       .onSnapshot(function (s) {
-        hoursCrews = s.docs.map(d => Object.assign({ id: d.id }, d.data()));
+        hoursCrews = s.docs.map(d => Object.assign({ id: d.id }, d.data())).filter(d => d.ended !== true);
         renderHours();
       }, function () { toast('Could not load crew history.'); });
     unsubHoursClocks = db.collection('timeclock')
