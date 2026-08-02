@@ -136,8 +136,9 @@
   .mainTabs {
     display: flex; border-bottom: 1px solid var(--border);
     background: var(--bg); position: sticky; top: 61px; z-index: 15;
-    padding: 0 16px;
+    padding: 0 16px; overflow-x: auto;
   }
+  .mainTabs button { white-space: nowrap; flex: none; }
   .mainTabs button {
     border: none; border-bottom: 2px solid transparent;
     color: var(--text-dim); font-weight: 700; font-size: 13px;
@@ -211,6 +212,53 @@
   .add-pop .empty { padding: 14px; font-size: 12px; color: var(--text-faint); }
 
   .crew-summary { font-size: 12px; color: var(--text-faint); margin: 4px 0 14px; }
+
+  /* ── Hours history ── */
+  .hoursbar { display: flex; gap: 10px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
+  .hoursbar select {
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--border-strong);
+    padding: 10px 12px; font-size: 14px; font-family: inherit; min-height: 44px; max-width: 100%;
+  }
+  .hrs-summary {
+    border: 1px solid var(--border-strong); background: var(--panel);
+    padding: 12px 14px; margin-bottom: 16px;
+  }
+  .hrs-summary h4 { font-size: 11px; letter-spacing: 2px; text-transform: uppercase; color: var(--text-dim); margin-bottom: 8px; }
+  .hrs-sumrow { display: flex; align-items: center; gap: 10px; padding: 6px 0; font-size: 13px; }
+  .hrs-sumrow .initials {
+    width: 24px; height: 24px; border-radius: 50%; flex: none;
+    display: inline-flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 700;
+  }
+  .hrs-sumrow .n { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hrs-sumrow .t { font-weight: 700; font-variant-numeric: tabular-nums; }
+  .hrs-sumrow .b { color: var(--text-faint); font-size: 11px; }
+
+  .hrs-day { border: 1px solid var(--border-strong); background: var(--panel); margin-bottom: 10px; }
+  .hrs-dayhead {
+    display: flex; align-items: center; gap: 10px;
+    padding: 12px 14px; cursor: pointer; user-select: none; min-height: 48px;
+    font-size: 14px; font-weight: 700;
+  }
+  .hrs-dayhead:hover { background: var(--panel-2); }
+  .hrs-dayhead .arr { color: var(--text-dim); font-size: 12px; }
+  .hrs-dayhead .tot { margin-left: auto; font-size: 12px; color: var(--text-dim); font-weight: 400; }
+  .hrs-daybody { border-top: 1px solid var(--border); padding: 4px 14px 12px; }
+  .hrs-crewhead {
+    font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase; font-weight: 700;
+    color: var(--text-dim); margin: 12px 0 2px;
+    display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap;
+  }
+  .hrs-crewhead .ct { font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--text-faint); }
+  .hrs-prow { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+  .hrs-prow:last-child { border-bottom: none; }
+  .hrs-prow .initials {
+    width: 24px; height: 24px; border-radius: 50%; flex: none;
+    display: inline-flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 700;
+  }
+  .hrs-prow .n { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hrs-prow .times { flex: 1; text-align: right; color: var(--text-dim); font-size: 11px; line-height: 1.5; min-width: 0; }
+  .hrs-prow .wt { font-weight: 700; font-variant-numeric: tabular-nums; flex: none; }
+  .hrs-empty { color: var(--text-faint); font-size: 13px; padding: 20px 4px; }
 
   /* ── Month nav ── */
   .month-nav { display: flex; align-items: center; justify-content: center; gap: 6px; margin-bottom: 14px; }
@@ -546,6 +594,7 @@
   <div class="mainTabs" id="mainTabs" style="display:none">
     <button type="button" id="tabCalBtn" class="on">Calendar</button>
     <button type="button" id="tabCrewsBtn">Crews &amp; Time Clock</button>
+    <button type="button" id="tabHoursBtn">Hours</button>
   </div>
 
   <main id="calMain">
@@ -587,6 +636,20 @@
     <div class="hint">Build crews from your available people, pick a lead (★), then clock the whole crew in with one tap. Clock people out individually as they leave — hours total up automatically.</div>
     <div id="crewsList"></div>
     <button type="button" class="primary" id="addCrewBtn">+ New crew</button>
+  </main>
+
+  <main id="hoursMain" style="display:none">
+    <div class="month-nav">
+      <button id="hoursPrevBtn" aria-label="Previous week">&#8592;</button>
+      <h2 id="hoursWeekLabel"></h2>
+      <button id="hoursNextBtn" aria-label="Next week">&#8594;</button>
+      <button id="hoursTodayBtn">This week</button>
+    </div>
+    <div class="hoursbar">
+      <select id="hoursFilter" title="Filter hours"></select>
+    </div>
+    <div id="hoursSummary"></div>
+    <div id="hoursList"></div>
   </main>
 </div>
 
@@ -718,6 +781,12 @@
   let timeclock = {};          // { uid: [ {in, out} ] } for crewDate
   let unsubCrews = null, unsubClock = null;
   let openAddFor = null;       // crew id whose add-person dropdown is open
+  let hoursStart = null;       // Date: Sunday of the week shown on the Hours tab
+  let hoursCrews = [];         // crew docs in the shown week
+  let hoursClocks = [];        // timeclock docs in the shown week
+  let unsubHoursCrews = null, unsubHoursClocks = null;
+  let hoursFilterVal = 'all';  // 'all' | 'crew:<name>' | 'uid:<uid>'
+  let hoursOpenDays = null;    // Set of expanded day keys (null = default)
   let pendingProfile = null;   // { name, inviteCode } captured at signup
   let showInactive = false;    // admin: reveal the inactive-employees section
   const COLLAPSE_KEY = 'wny-team-collapsed';
@@ -856,6 +925,8 @@
     if (unsubPub) { unsubPub(); unsubPub = null; }
     if (unsubCrews) { unsubCrews(); unsubCrews = null; }
     if (unsubClock) { unsubClock(); unsubClock = null; }
+    if (unsubHoursCrews) { unsubHoursCrews(); unsubHoursCrews = null; }
+    if (unsubHoursClocks) { unsubHoursClocks(); unsubHoursClocks = null; }
     closeSheet(); closeModal();
   }
 
@@ -1241,12 +1312,20 @@
     activeTab = tab;
     $('tabCalBtn').classList.toggle('on', tab === 'calendar');
     $('tabCrewsBtn').classList.toggle('on', tab === 'crews');
+    $('tabHoursBtn').classList.toggle('on', tab === 'hours');
     $('calMain').style.display = tab === 'calendar' ? '' : 'none';
     $('crewsMain').style.display = tab === 'crews' ? '' : 'none';
+    $('hoursMain').style.display = tab === 'hours' ? '' : 'none';
     if (tab === 'crews') renderCrews();
+    if (tab === 'hours') {
+      if (!hoursStart) { hoursStart = new Date(); hoursStart.setDate(hoursStart.getDate() - hoursStart.getDay()); }
+      if (!unsubHoursClocks) subscribeHours();
+      renderHours();
+    }
   }
   $('tabCalBtn').addEventListener('click', function () { showTab('calendar'); });
   $('tabCrewsBtn').addEventListener('click', function () { showTab('crews'); });
+  $('tabHoursBtn').addEventListener('click', function () { showTab('hours'); });
 
   function subscribeCrews() {
     if (unsubCrews) unsubCrews();
@@ -1606,8 +1685,306 @@
     });
   }
 
-  // Keep running timers fresh while the crews tab is open
-  setInterval(function () { if (activeTab === 'crews' && isAdmin) renderCrews(); }, 30000);
+  // ── Hours history (admin) ──
+  function hoursRange() {
+    const start = new Date(hoursStart);
+    const end = new Date(hoursStart);
+    end.setDate(end.getDate() + 6);
+    return {
+      start: dateKey(start.getFullYear(), start.getMonth(), start.getDate()),
+      end: dateKey(end.getFullYear(), end.getMonth(), end.getDate()),
+      startD: start, endD: end
+    };
+  }
+
+  function subscribeHours() {
+    if (unsubHoursCrews) unsubHoursCrews();
+    if (unsubHoursClocks) unsubHoursClocks();
+    const r = hoursRange();
+    unsubHoursCrews = db.collection('crews')
+      .where('date', '>=', r.start).where('date', '<=', r.end)
+      .onSnapshot(function (s) {
+        hoursCrews = s.docs.map(d => Object.assign({ id: d.id }, d.data()));
+        renderHours();
+      }, function () { toast('Could not load crew history.'); });
+    unsubHoursClocks = db.collection('timeclock')
+      .where('date', '>=', r.start).where('date', '<=', r.end)
+      .onSnapshot(function (s) {
+        hoursClocks = s.docs.map(d => d.data());
+        renderHours();
+      }, function () { toast('Could not load saved hours.'); });
+  }
+
+  function shiftHoursWeek(days) {
+    hoursStart.setDate(hoursStart.getDate() + days);
+    hoursOpenDays = null;
+    subscribeHours();
+    renderHours();
+  }
+  $('hoursPrevBtn').addEventListener('click', function () { shiftHoursWeek(-7); });
+  $('hoursNextBtn').addEventListener('click', function () { shiftHoursWeek(7); });
+  $('hoursTodayBtn').addEventListener('click', function () {
+    hoursStart = new Date();
+    hoursStart.setDate(hoursStart.getDate() - hoursStart.getDay());
+    hoursOpenDays = null;
+    subscribeHours();
+    renderHours();
+  });
+  $('hoursFilter').addEventListener('change', function () {
+    hoursFilterVal = $('hoursFilter').value;
+    renderHours();
+  });
+
+  // Worked ms for a saved doc; open sessions only keep counting on today
+  function docWorkedMs(t) {
+    const live = t.date === todayKey();
+    return (t.sessions || []).reduce(function (sum, s) {
+      return sum + ((s.out || (live ? Date.now() : s.in)) - s.in);
+    }, 0);
+  }
+  function docBreakMs(t) {
+    const live = t.date === todayKey() && t.onBreak && t.breakStart;
+    return (t.breakMs || 0) + (live ? Date.now() - t.breakStart : 0);
+  }
+  function docTimesLabel(t) {
+    const parts = (t.sessions || []).map(function (s) {
+      return fmtClock(s.in) + '–' + (s.out ? fmtClock(s.out) : (t.date === todayKey() ? 'now' : '?'));
+    });
+    return parts.join(', ') || '—';
+  }
+
+  function renderHours() {
+    if (!isAdmin || activeTab !== 'hours') return;
+    const r = hoursRange();
+    const fmt = d => MONTHS[d.getMonth()].slice(0, 3) + ' ' + d.getDate();
+    $('hoursWeekLabel').textContent = fmt(r.startD) + ' – ' + fmt(r.endD);
+
+    const byId = {};
+    employees.forEach(e => { byId[e.id] = e; });
+
+    // Filter dropdown: Everyone / crew names in range / individual people
+    const sel = $('hoursFilter');
+    sel.innerHTML = '';
+    const optAll = document.createElement('option');
+    optAll.value = 'all';
+    optAll.textContent = 'Everyone';
+    sel.appendChild(optAll);
+    const crewNames = [...new Set(hoursCrews.map(c => c.name || 'Crew'))].sort();
+    if (crewNames.length) {
+      const gC = document.createElement('optgroup');
+      gC.label = 'Whole crew';
+      crewNames.forEach(function (n) {
+        const o = document.createElement('option');
+        o.value = 'crew:' + n;
+        o.textContent = n;
+        gC.appendChild(o);
+      });
+      sel.appendChild(gC);
+    }
+    const gP = document.createElement('optgroup');
+    gP.label = 'Individual';
+    employees.filter(isActiveEmp).sort((a, b) => a.name.localeCompare(b.name)).forEach(function (e) {
+      const o = document.createElement('option');
+      o.value = 'uid:' + e.id;
+      o.textContent = e.name;
+      gP.appendChild(o);
+    });
+    sel.appendChild(gP);
+    if (![...sel.options].some(o => o.value === hoursFilterVal)) hoursFilterVal = 'all';
+    sel.value = hoursFilterVal;
+
+    const filterUid = hoursFilterVal.startsWith('uid:') ? hoursFilterVal.slice(4) : null;
+    const filterCrew = hoursFilterVal.startsWith('crew:') ? hoursFilterVal.slice(5) : null;
+
+    // Per-date structures with the filter applied
+    const dates = [...new Set(hoursClocks.map(t => t.date).concat(hoursCrews.map(c => c.date)))].sort().reverse();
+    const perDate = {};
+    dates.forEach(function (date) {
+      let dayCrews = hoursCrews.filter(c => c.date === date);
+      let dayClocks = hoursClocks.filter(t => t.date === date);
+      if (filterCrew) {
+        dayCrews = dayCrews.filter(c => (c.name || 'Crew') === filterCrew);
+        const allowed = new Set();
+        dayCrews.forEach(c => (c.members || []).forEach(uid => allowed.add(uid)));
+        dayClocks = dayClocks.filter(t => allowed.has(t.uid));
+      } else if (filterUid) {
+        dayClocks = dayClocks.filter(t => t.uid === filterUid);
+        dayCrews = dayCrews.filter(c => (c.members || []).includes(filterUid));
+      }
+      if (dayClocks.length || dayCrews.some(c => (c.members || []).length)) {
+        perDate[date] = { crews: dayCrews, clocks: dayClocks };
+      }
+    });
+
+    // Week totals per person
+    const totals = {};
+    Object.keys(perDate).forEach(function (date) {
+      perDate[date].clocks.forEach(function (t) {
+        if (!totals[t.uid]) totals[t.uid] = { worked: 0, brk: 0, days: 0 };
+        totals[t.uid].worked += docWorkedMs(t);
+        totals[t.uid].brk += docBreakMs(t);
+        totals[t.uid].days += 1;
+      });
+    });
+    const sum = $('hoursSummary');
+    sum.innerHTML = '';
+    const totalUids = Object.keys(totals).sort((a, b) => totals[b].worked - totals[a].worked);
+    if (totalUids.length) {
+      const card = document.createElement('div');
+      card.className = 'hrs-summary';
+      const h = document.createElement('h4');
+      h.textContent = 'Week totals';
+      card.appendChild(h);
+      totalUids.forEach(function (uid) {
+        const emp = byId[uid] || { name: '(removed)', color: '#9e9e9e' };
+        const rowS = document.createElement('div');
+        rowS.className = 'hrs-sumrow';
+        const init = document.createElement('span');
+        init.className = 'initials';
+        init.textContent = initials(emp.name);
+        init.style.background = empColor(emp);
+        init.style.color = contrastText(empColor(emp));
+        rowS.appendChild(init);
+        const n = document.createElement('span');
+        n.className = 'n';
+        n.textContent = emp.name;
+        rowS.appendChild(n);
+        const b = document.createElement('span');
+        b.className = 'b';
+        b.textContent = totals[uid].days + ' day' + (totals[uid].days === 1 ? '' : 's')
+          + (totals[uid].brk > 0 ? ' · break ' + fmtDur(totals[uid].brk) : '');
+        rowS.appendChild(b);
+        const t = document.createElement('span');
+        t.className = 't';
+        t.textContent = fmtDur(totals[uid].worked);
+        rowS.appendChild(t);
+        card.appendChild(rowS);
+      });
+      sum.appendChild(card);
+    }
+
+    // Day sections (collapsible)
+    const list = $('hoursList');
+    list.innerHTML = '';
+    const dateKeys = Object.keys(perDate);
+    if (!dateKeys.length) {
+      const em = document.createElement('div');
+      em.className = 'hrs-empty';
+      em.textContent = 'No hours recorded this week' + (hoursFilterVal !== 'all' ? ' for this filter' : '') + '.';
+      list.appendChild(em);
+      return;
+    }
+    if (hoursOpenDays === null) hoursOpenDays = new Set([dateKeys[0]]); // newest day open by default
+
+    dateKeys.forEach(function (date) {
+      const day = perDate[date];
+      const open = hoursOpenDays.has(date);
+      const sec = document.createElement('div');
+      sec.className = 'hrs-day';
+
+      const p = date.split('-');
+      const dObj = new Date(+p[0], +p[1] - 1, +p[2]);
+      const dayTotal = day.clocks.reduce((s, t) => s + docWorkedMs(t), 0);
+
+      const head = document.createElement('div');
+      head.className = 'hrs-dayhead';
+      const arr = document.createElement('span');
+      arr.className = 'arr';
+      arr.textContent = open ? '▾' : '▸';
+      head.appendChild(arr);
+      head.appendChild(document.createTextNode(DOW[dObj.getDay()] + ', ' + MONTHS[dObj.getMonth()] + ' ' + dObj.getDate()));
+      const tot = document.createElement('span');
+      tot.className = 'tot';
+      tot.textContent = day.clocks.length + ' ' + (day.clocks.length === 1 ? 'person' : 'people') + ' · ' + fmtDur(dayTotal);
+      head.appendChild(tot);
+      head.addEventListener('click', function () {
+        if (hoursOpenDays.has(date)) hoursOpenDays.delete(date); else hoursOpenDays.add(date);
+        renderHours();
+      });
+      sec.appendChild(head);
+
+      if (open) {
+        const body = document.createElement('div');
+        body.className = 'hrs-daybody';
+        const covered = new Set();
+
+        function personRow(uid, t) {
+          const emp = byId[uid] || { name: '(removed)', color: '#9e9e9e' };
+          const rowP = document.createElement('div');
+          rowP.className = 'hrs-prow';
+          const init = document.createElement('span');
+          init.className = 'initials';
+          init.textContent = initials(emp.name);
+          init.style.background = empColor(emp);
+          init.style.color = contrastText(empColor(emp));
+          rowP.appendChild(init);
+          const n = document.createElement('span');
+          n.className = 'n';
+          n.textContent = emp.name;
+          rowP.appendChild(n);
+          const times = document.createElement('span');
+          times.className = 'times';
+          if (t) {
+            const brkMs = docBreakMs(t);
+            times.textContent = docTimesLabel(t) + (brkMs > 0 ? ' · break ' + fmtDur(brkMs) : '');
+          } else {
+            times.textContent = 'no hours';
+          }
+          rowP.appendChild(times);
+          const wt = document.createElement('span');
+          wt.className = 'wt';
+          wt.textContent = t ? fmtDur(docWorkedMs(t)) : '—';
+          rowP.appendChild(wt);
+          return rowP;
+        }
+
+        day.crews.forEach(function (crew) {
+          const members = (crew.members || []).filter(uid => !filterUid || uid === filterUid);
+          if (!members.length) return;
+          const ch = document.createElement('div');
+          ch.className = 'hrs-crewhead';
+          ch.textContent = crew.name || 'Crew';
+          if (crew.lead && byId[crew.lead]) {
+            const ct = document.createElement('span');
+            ct.className = 'ct';
+            ct.textContent = '★ ' + byId[crew.lead].name;
+            ch.appendChild(ct);
+          }
+          const crewTotal = members.reduce(function (s, uid) {
+            const t = day.clocks.find(x => x.uid === uid);
+            return s + (t ? docWorkedMs(t) : 0);
+          }, 0);
+          const ct2 = document.createElement('span');
+          ct2.className = 'ct';
+          ct2.textContent = fmtDur(crewTotal) + ' total';
+          ch.appendChild(ct2);
+          body.appendChild(ch);
+          members.forEach(function (uid) {
+            covered.add(uid);
+            body.appendChild(personRow(uid, day.clocks.find(x => x.uid === uid) || null));
+          });
+        });
+
+        const loose = day.clocks.filter(t => !covered.has(t.uid));
+        if (loose.length) {
+          const ch = document.createElement('div');
+          ch.className = 'hrs-crewhead';
+          ch.textContent = 'No crew';
+          body.appendChild(ch);
+          loose.forEach(function (t) { body.appendChild(personRow(t.uid, t)); });
+        }
+        sec.appendChild(body);
+      }
+      list.appendChild(sec);
+    });
+  }
+
+  // Keep running timers fresh while the crews or hours tab is open
+  setInterval(function () {
+    if (!isAdmin) return;
+    if (activeTab === 'crews') renderCrews();
+    if (activeTab === 'hours') renderHours();
+  }, 30000);
 
   document.addEventListener('click', function () {
     if (openAddFor) { openAddFor = null; renderCrews(); }
@@ -1926,7 +2303,8 @@
       cal.appendChild(cell);
     }
 
-    renderCrews(); // keep the crews tab in sync with roster/availability changes
+    renderCrews(); // keep the admin tabs in sync with roster/availability changes
+    renderHours();
   }
 
   // ── PWA ──
