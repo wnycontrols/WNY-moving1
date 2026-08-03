@@ -69,6 +69,18 @@
     padding: 12px; font-size: 15px; font-family: inherit; width: 100%; resize: vertical;
   }
   textarea:focus { outline: none; border-color: var(--text); }
+  input[type="time"] {
+    background: var(--panel); border: 1px solid var(--border-strong); color: var(--text);
+    padding: 8px 10px; font-size: 15px; font-family: inherit; min-height: 44px;
+    color-scheme: dark;
+  }
+  input[type="time"]:focus { outline: none; border-color: var(--text); }
+  .clock-row { display: flex; gap: 8px; align-items: center; margin: 8px 0; }
+  .clock-row .dash { color: var(--text-faint); }
+  .clock-row .rmx { border: none; color: var(--text-faint); font-size: 15px; min-height: 36px; padding: 4px 8px; background: none; cursor: pointer; }
+  .clock-row .rmx:hover { color: var(--danger); }
+  .edit-clock { border: none; color: var(--text-faint); font-size: 13px; min-height: 36px; padding: 4px 8px; background: none; cursor: pointer; flex: none; }
+  .edit-clock:hover { background: none; color: var(--text); }
   label.field { display: block; font-size: 12px; color: var(--text-dim); margin: 14px 0 6px; text-transform: uppercase; letter-spacing: 1px; }
 
   /* ── Centered screens (loading / setup / auth / profile) ── */
@@ -706,6 +718,21 @@
   </form>
 </div>
 
+<!-- ═══ Edit clock times modal ═══ -->
+<div class="modal" id="clockModal">
+  <h3 id="clockModalTitle">Edit times</h3>
+  <div class="note" id="clockModalSub" style="margin-bottom:6px"></div>
+  <div id="clockSessions"></div>
+  <button type="button" class="ghost" id="addSessionBtn">+ Add time block</button>
+  <label class="field" for="clockBreakMin">Break (minutes)</label>
+  <input type="text" id="clockBreakMin" inputmode="numeric" pattern="[0-9]*">
+  <div class="form-msg" id="clockMsg"></div>
+  <div class="form-actions">
+    <button type="button" id="clockCancel">Cancel</button>
+    <button type="button" class="primary" id="clockSave">Save</button>
+  </div>
+</div>
+
 <!-- ═══ Usual week (pattern) modal ═══ -->
 <div class="modal" id="patternModal">
   <h3>My usual week</h3>
@@ -1120,8 +1147,112 @@
   function closeModal() {
     $('settingsModal').classList.remove('open');
     $('patternModal').classList.remove('open');
+    $('clockModal').classList.remove('open');
     $('modalOverlay').classList.remove('open');
   }
+
+  // ── Edit clock times (admin) ──
+  let clockEditTarget = null;   // { uid, date, doc }
+  let clockDraft = [];          // [ { inT: 'HH:MM', outT: 'HH:MM'|'' } ]
+
+  function msToHM(ms) {
+    const d = new Date(ms);
+    return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+  }
+  function hmToMs(dateStr, hm) {
+    const p = dateStr.split('-');
+    const t = hm.split(':');
+    return new Date(+p[0], +p[1] - 1, +p[2], +t[0], +t[1]).getTime();
+  }
+
+  function openClockEditor(uid, date, doc, personName) {
+    clockEditTarget = { uid: uid, date: date, doc: doc || null };
+    const d = doc || { sessions: [], breakMs: 0 };
+    clockDraft = (d.sessions || []).map(s => ({ inT: msToHM(s.in), outT: s.out ? msToHM(s.out) : '' }));
+    if (!clockDraft.length) clockDraft.push({ inT: '', outT: '' });
+    const p = date.split('-');
+    const dObj = new Date(+p[0], +p[1] - 1, +p[2]);
+    $('clockModalTitle').textContent = 'Edit times — ' + personName;
+    $('clockModalSub').textContent = DOW[dObj.getDay()] + ', ' + MONTHS[dObj.getMonth()] + ' ' + dObj.getDate()
+      + '. Leave the end time empty to keep someone on the clock.';
+    $('clockBreakMin').value = String(Math.round((d.breakMs || 0) / 60000));
+    $('clockMsg').textContent = '';
+    renderClockRows();
+    $('clockModal').classList.add('open');
+    $('modalOverlay').classList.add('open');
+  }
+
+  function renderClockRows() {
+    const wrap = $('clockSessions');
+    wrap.innerHTML = '';
+    clockDraft.forEach(function (row, i) {
+      const el = document.createElement('div');
+      el.className = 'clock-row';
+      const inI = document.createElement('input');
+      inI.type = 'time';
+      inI.value = row.inT;
+      inI.addEventListener('change', function () { row.inT = inI.value; });
+      el.appendChild(inI);
+      const dash = document.createElement('span');
+      dash.className = 'dash';
+      dash.textContent = '–';
+      el.appendChild(dash);
+      const outI = document.createElement('input');
+      outI.type = 'time';
+      outI.value = row.outT;
+      outI.addEventListener('change', function () { row.outT = outI.value; });
+      el.appendChild(outI);
+      const rm = document.createElement('button');
+      rm.type = 'button';
+      rm.className = 'rmx';
+      rm.textContent = '×';
+      rm.title = 'Remove this time block';
+      rm.addEventListener('click', function () { clockDraft.splice(i, 1); renderClockRows(); });
+      el.appendChild(rm);
+      wrap.appendChild(el);
+    });
+  }
+
+  $('addSessionBtn').addEventListener('click', function () {
+    clockDraft.push({ inT: '', outT: '' });
+    renderClockRows();
+  });
+  $('clockCancel').addEventListener('click', closeModal);
+  $('clockSave').addEventListener('click', function () {
+    const t = clockEditTarget;
+    if (!t) return;
+    const breakMin = parseInt($('clockBreakMin').value, 10);
+    if (isNaN(breakMin) || breakMin < 0 || breakMin > 1440) {
+      $('clockMsg').textContent = 'Break minutes must be a number between 0 and 1440.'; return;
+    }
+    const sessions = [];
+    for (const row of clockDraft) {
+      if (!row.inT && !row.outT) continue;
+      if (!row.inT) { $('clockMsg').textContent = 'Every time block needs a start time.'; return; }
+      const inMs = hmToMs(t.date, row.inT);
+      const outMs = row.outT ? hmToMs(t.date, row.outT) : null;
+      if (outMs !== null && outMs <= inMs) {
+        $('clockMsg').textContent = 'End time must be after start time (' + row.inT + '–' + row.outT + ').'; return;
+      }
+      sessions.push({ in: inMs, out: outMs });
+    }
+    sessions.sort((a, b) => a.in - b.in);
+    const ref = db.collection('timeclock').doc(t.uid + '_' + t.date);
+    const prev = t.doc || {};
+    let op;
+    if (!sessions.length && breakMin === 0) {
+      op = ref.delete();
+    } else {
+      op = ref.set({
+        uid: t.uid, date: t.date, sessions: sessions,
+        onBreak: prev.onBreak === true && !sessions.some(s => !s.out) ? true : false,
+        breakStart: prev.onBreak === true ? (prev.breakStart || null) : null,
+        breakMs: breakMin * 60000
+      });
+    }
+    op.then(function () { closeModal(); toast('Times updated.'); })
+      .catch(function () { $('clockMsg').textContent = 'Could not save the times.'; });
+  });
   $('settingsCancel').addEventListener('click', closeModal);
   $('modalOverlay').addEventListener('click', closeModal);
 
@@ -1644,6 +1775,15 @@
           row.appendChild(btn);
         }
 
+        const editT = document.createElement('button');
+        editT.className = 'edit-clock';
+        editT.textContent = '✎';
+        editT.title = 'Edit ' + emp.name + '’s times';
+        editT.addEventListener('click', function () {
+          openClockEditor(uid, crewDate, timeclock[uid] || null, emp.name);
+        });
+        row.appendChild(editT);
+
         const rm = document.createElement('button');
         rm.className = 'rm';
         rm.textContent = '×';
@@ -2044,6 +2184,14 @@
           wt.className = 'wt';
           wt.textContent = t ? fmtDur(docWorkedMs(t)) : '—';
           rowP.appendChild(wt);
+          const editT = document.createElement('button');
+          editT.className = 'edit-clock';
+          editT.textContent = '✎';
+          editT.title = 'Edit ' + emp.name + '’s times for this day';
+          editT.addEventListener('click', function () {
+            openClockEditor(uid, date, t, emp.name);
+          });
+          rowP.appendChild(editT);
           return rowP;
         }
 
