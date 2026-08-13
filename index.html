@@ -1174,7 +1174,7 @@
     const dObj = new Date(+p[0], +p[1] - 1, +p[2]);
     $('clockModalTitle').textContent = 'Edit times — ' + personName;
     $('clockModalSub').textContent = DOW[dObj.getDay()] + ', ' + MONTHS[dObj.getMonth()] + ' ' + dObj.getDate()
-      + '. Leave the end time empty to keep someone on the clock.';
+      + '. Break minutes are deducted from the total automatically. Leave the end time empty to keep someone on the clock.';
     $('clockBreakMin').value = String(Math.round((d.breakMs || 0) / 60000));
     $('clockMsg').textContent = '';
     renderClockRows();
@@ -1245,7 +1245,7 @@
     } else {
       op = ref.set({
         uid: t.uid, date: t.date, sessions: sessions,
-        onBreak: prev.onBreak === true && !sessions.some(s => !s.out) ? true : false,
+        onBreak: prev.onBreak === true,
         breakStart: prev.onBreak === true ? (prev.breakStart || null) : null,
         breakMs: breakMin * 60000
       });
@@ -1541,12 +1541,14 @@
   function sessionsOf(uid) { return clockDoc(uid).sessions || []; }
   function openSession(uid) { return sessionsOf(uid).find(s => !s.out) || null; }
   function onBreak(uid) { return clockDoc(uid).onBreak === true; }
-  function totalWorkedMs(uid) {
-    return sessionsOf(uid).reduce((sum, s) => sum + ((s.out || Date.now()) - s.in), 0);
-  }
   function totalBreakMs(uid) {
     const d = clockDoc(uid);
     return (d.breakMs || 0) + (d.onBreak && d.breakStart ? Date.now() - d.breakStart : 0);
+  }
+  // Worked time = time on the clock minus all break time
+  function totalWorkedMs(uid) {
+    const onClock = sessionsOf(uid).reduce((sum, s) => sum + ((s.out || Date.now()) - s.in), 0);
+    return Math.max(0, onClock - totalBreakMs(uid));
   }
   function fmtClock(ms) {
     return new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
@@ -1570,22 +1572,23 @@
   }
   function clockOut(uid) {
     const d = clockDoc(uid);
-    const sessions = sessionsOf(uid).map(s => s.out ? s : { in: s.in, out: Date.now() });
-    if (!sessions.length && !d.onBreak) return;
     // Clocking out during a break: the day ended when the break started.
+    const cut = d.onBreak && d.breakStart ? d.breakStart : Date.now();
+    const sessions = sessionsOf(uid).map(s => s.out ? s : { in: s.in, out: cut });
+    if (!sessions.length && !d.onBreak) return;
     writeClock(uid, { sessions: sessions, onBreak: false, breakStart: null, breakMs: d.breakMs || 0 });
   }
   function startBreak(uid) {
     if (!openSession(uid) || onBreak(uid)) return;
     const d = clockDoc(uid);
-    const sessions = sessionsOf(uid).map(s => s.out ? s : { in: s.in, out: Date.now() });
-    writeClock(uid, { sessions: sessions, onBreak: true, breakStart: Date.now(), breakMs: d.breakMs || 0 });
+    // The session keeps running; break time is deducted from the total instead.
+    writeClock(uid, { sessions: sessionsOf(uid), onBreak: true, breakStart: Date.now(), breakMs: d.breakMs || 0 });
   }
   function endBreak(uid) {
     const d = clockDoc(uid);
     if (!d.onBreak) return;
     writeClock(uid, {
-      sessions: sessionsOf(uid).concat([{ in: Date.now(), out: null }]),
+      sessions: sessionsOf(uid),
       onBreak: false, breakStart: null,
       breakMs: (d.breakMs || 0) + (d.breakStart ? Date.now() - d.breakStart : 0)
     });
@@ -1984,16 +1987,18 @@
     renderHours();
   });
 
-  // Worked ms for a saved doc; open sessions only keep counting on today
-  function docWorkedMs(t) {
-    const live = t.date === todayKey();
-    return (t.sessions || []).reduce(function (sum, s) {
-      return sum + ((s.out || (live ? Date.now() : s.in)) - s.in);
-    }, 0);
-  }
   function docBreakMs(t) {
     const live = t.date === todayKey() && t.onBreak && t.breakStart;
     return (t.breakMs || 0) + (live ? Date.now() - t.breakStart : 0);
+  }
+  // Worked ms for a saved doc = clock time minus breaks; open sessions only
+  // keep counting on today
+  function docWorkedMs(t) {
+    const live = t.date === todayKey();
+    const onClock = (t.sessions || []).reduce(function (sum, s) {
+      return sum + ((s.out || (live ? Date.now() : s.in)) - s.in);
+    }, 0);
+    return Math.max(0, onClock - docBreakMs(t));
   }
   function docTimesLabel(t) {
     const parts = (t.sessions || []).map(function (s) {
