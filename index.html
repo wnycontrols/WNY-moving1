@@ -741,8 +741,12 @@
 
 <!-- ═══ Rates & taxes modal ═══ -->
 <div class="modal" id="payrollModal">
-  <h3>Rates &amp; taxes</h3>
-  <div class="note" style="margin-bottom:4px">Set each person's hourly rate and an estimated total tax percentage (Social Security + Medicare is 7.65%; with federal and NY state withholding, 20–25% is typical). The after-tax numbers are estimates for planning — not actual payroll withholding.</div>
+  <h3>Rates &amp; pay periods</h3>
+  <div class="note" style="margin-bottom:4px">Taxes are calculated automatically for everyone the same way as the company paychecks: federal and NY State withholding (Single/0, biweekly), Social Security 6.2%, Medicare 1.45%, NY SDI $0.60/week, and NYS Paid Family Leave 0.432%.</div>
+  <label class="field" for="setAnchor">Pay period start (the first day of any real 2-week pay period)</label>
+  <input type="date" id="setAnchor">
+  <div class="note">Every 2-week period is counted from this date. It snaps to that week's Sunday.</div>
+  <label class="field">Hourly rates</label>
   <div id="payrollRows"></div>
   <div class="form-msg" id="payrollMsg"></div>
   <div class="form-actions">
@@ -866,8 +870,11 @@
   let dayEndedAt = null;
   let workers = [];            // clock-only people without accounts
   let unsubWorkers = null;
-  let payrollMap = {};         // { uid: { rate, taxPct } } — admin-only
+  let payrollMap = {};         // { uid: { rate } } — admin-only
+  let payConfig = null;        // payroll/_config: { anchor: 'YYYY-MM-DD' }
   let unsubPayroll = null;
+  const DEFAULT_ANCHOR = '2026-01-04'; // a Sunday; pay periods count in 2-week steps from here
+  let paycheckOpen = {};       // uids with the tax breakdown expanded
   let pendingProfile = null;   // { name, inviteCode } captured at signup
   let showInactive = false;    // admin: reveal the inactive-employees section
   const COLLAPSE_KEY = 'wny-team-collapsed';
@@ -1029,7 +1036,14 @@
       }, function () { /* not fatal */ });
       unsubPayroll = db.collection('payroll').onSnapshot(function (s) {
         payrollMap = {};
-        s.forEach(function (d) { payrollMap[d.id] = d.data(); });
+        let cfg = null;
+        s.forEach(function (d) {
+          if (d.id === '_config') cfg = d.data();
+          else payrollMap[d.id] = d.data();
+        });
+        const anchorChanged = (cfg && cfg.anchor) !== (payConfig && payConfig.anchor);
+        payConfig = cfg;
+        if (anchorChanged && unsubHoursClocks) subscribeHours();
         renderHours();
       }, function () { /* not fatal */ });
     }
@@ -1197,28 +1211,59 @@
   function fmtMoney(x) {
     return '$' + x.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
-  function payFor(uid, workedMs) {
+  function grossFor(uid, workedMs) {
     const p = payrollMap[uid];
     if (!p || !(p.rate > 0)) return null;
-    const gross = (workedMs / 3600000) * p.rate;
-    const taxPct = p.taxPct > 0 ? p.taxPct : 0;
-    return { gross: gross, net: gross * (1 - taxPct / 100), taxPct: taxPct };
+    return (workedMs / 3600000) * p.rate;
   }
 
-  let payrollDraft = {};       // { uid: { rate: 'str', taxPct: 'str' } }
+  // Exact biweekly withholding, matched to the company's paychecks
+  // (federal Single/0 and NY Single/0 percentage methods, 2026 tables).
+  const FED_STD_DEDUCTION = 16100;
+  const FED_BRACKETS = [[12400, 0.10], [50400, 0.12], [105700, 0.22], [201775, 0.24], [256225, 0.32], [640600, 0.35], [Infinity, 0.37]];
+  const NY_DEDUCTION = 8500;
+  const NY_BRACKETS = [[8500, 0.04], [11700, 0.045], [13900, 0.0525], [80650, 0.055], [215400, 0.06], [1077550, 0.0685], [Infinity, 0.0965]];
+
+  function bracketTax(taxable, brackets) {
+    let tax = 0, prev = 0;
+    for (const [upTo, rate] of brackets) {
+      if (taxable <= prev) break;
+      tax += (Math.min(taxable, upTo) - prev) * rate;
+      prev = upTo;
+    }
+    return tax;
+  }
+  const floorC = x => Math.floor(x * 100) / 100;
+  const roundC = x => Math.round(x * 100) / 100;
+
+  function calcPaycheck(periodGross, weeksWorked) {
+    const annual = periodGross * 26;
+    const fed = floorC(bracketTax(Math.max(0, annual - FED_STD_DEDUCTION), FED_BRACKETS) / 26);
+    const ny = floorC(bracketTax(Math.max(0, annual - NY_DEDUCTION), NY_BRACKETS) / 26);
+    const oasdi = roundC(periodGross * 0.062);
+    const medicare = roundC(periodGross * 0.0145);
+    const sdi = roundC(0.60 * weeksWorked);
+    const pfl = roundC(periodGross * 0.00432);
+    const taxes = roundC(fed + ny + oasdi + medicare + sdi + pfl);
+    return {
+      gross: roundC(periodGross), fed: fed, ny: ny, oasdi: oasdi,
+      medicare: medicare, sdi: sdi, pfl: pfl, taxes: taxes,
+      net: roundC(periodGross - taxes)
+    };
+  }
+
+  let payrollDraft = {};       // { uid: { rate: 'str' } }
 
   $('payrollBtn').addEventListener('click', function () {
     const people = employees.filter(isActiveEmp).concat(workers)
       .sort((a, b) => a.name.localeCompare(b.name));
     payrollDraft = {};
+    $('setAnchor').value = (payConfig && payConfig.anchor) || DEFAULT_ANCHOR;
     const wrap = $('payrollRows');
     wrap.innerHTML = '';
     people.forEach(function (emp) {
       const cur = payrollMap[emp.id] || {};
-      payrollDraft[emp.id] = {
-        rate: cur.rate > 0 ? String(cur.rate) : '',
-        taxPct: cur.taxPct > 0 ? String(cur.taxPct) : ''
-      };
+      payrollDraft[emp.id] = { rate: cur.rate > 0 ? String(cur.rate) : '' };
       const row = document.createElement('div');
       row.className = 'pay-row';
       const init = document.createElement('span');
@@ -1243,17 +1288,6 @@
       f1.appendChild(rateI);
       f1.appendChild(document.createTextNode('/hr'));
       row.appendChild(f1);
-      const f2 = document.createElement('label');
-      f2.className = 'fld';
-      const taxI = document.createElement('input');
-      taxI.type = 'text';
-      taxI.inputMode = 'decimal';
-      taxI.placeholder = '20';
-      taxI.value = payrollDraft[emp.id].taxPct;
-      taxI.addEventListener('input', function () { payrollDraft[emp.id].taxPct = taxI.value; });
-      f2.appendChild(taxI);
-      f2.appendChild(document.createTextNode('% tax'));
-      row.appendChild(f2);
       wrap.appendChild(row);
     });
     $('payrollMsg').textContent = '';
@@ -1263,20 +1297,23 @@
   $('payrollCancel').addEventListener('click', closeModal);
   $('payrollSave').addEventListener('click', function () {
     const writes = [];
+    const anchor = $('setAnchor').value;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(anchor)) { $('payrollMsg').textContent = 'Pick a pay period start date.'; return; }
+    if (anchor !== ((payConfig && payConfig.anchor) || '')) {
+      writes.push(db.doc('payroll/_config').set({ anchor: anchor }));
+    }
     for (const uid of Object.keys(payrollDraft)) {
       const d = payrollDraft[uid];
       const rate = d.rate.trim() === '' ? 0 : parseFloat(d.rate);
-      const taxPct = d.taxPct.trim() === '' ? 0 : parseFloat(d.taxPct);
       if (isNaN(rate) || rate < 0 || rate > 1000) { $('payrollMsg').textContent = 'Hourly rates must be numbers between 0 and 1000.'; return; }
-      if (isNaN(taxPct) || taxPct < 0 || taxPct > 60) { $('payrollMsg').textContent = 'Tax percentages must be numbers between 0 and 60.'; return; }
       const cur = payrollMap[uid] || {};
-      if ((cur.rate || 0) !== rate || (cur.taxPct || 0) !== taxPct) {
-        writes.push(db.doc('payroll/' + uid).set({ rate: rate, taxPct: taxPct }));
+      if ((cur.rate || 0) !== rate) {
+        writes.push(db.doc('payroll/' + uid).set({ rate: rate }));
       }
     }
     Promise.all(writes)
-      .then(function () { closeModal(); toast(writes.length ? 'Rates saved.' : 'No changes.'); })
-      .catch(function () { $('payrollMsg').textContent = 'Could not save rates.'; });
+      .then(function () { closeModal(); subscribeHours(); toast(writes.length ? 'Saved.' : 'No changes.'); })
+      .catch(function () { $('payrollMsg').textContent = 'Could not save.'; });
   });
 
   // ── Edit clock times (admin) ──
@@ -2077,18 +2114,42 @@
     };
   }
 
+  // The 2-week pay period containing the shown week, counted from the anchor
+  function payPeriod() {
+    const a = ((payConfig && payConfig.anchor) || DEFAULT_ANCHOR).split('-');
+    const anchor = new Date(+a[0], +a[1] - 1, +a[2]);
+    anchor.setDate(anchor.getDate() - anchor.getDay()); // snap to that week's Sunday
+    const weeks = Math.round((hoursStart - anchor) / 604800000);
+    const startWk = weeks - ((weeks % 2) + 2) % 2;
+    const start = new Date(anchor);
+    start.setDate(start.getDate() + startWk * 7);
+    const end = new Date(start);
+    end.setDate(end.getDate() + 13);
+    const mid = new Date(start);
+    mid.setDate(mid.getDate() + 7);
+    return {
+      start: dateKey(start.getFullYear(), start.getMonth(), start.getDate()),
+      mid: dateKey(mid.getFullYear(), mid.getMonth(), mid.getDate()),
+      end: dateKey(end.getFullYear(), end.getMonth(), end.getDate()),
+      startD: start, endD: end
+    };
+  }
+
   function subscribeHours() {
     if (unsubHoursCrews) unsubHoursCrews();
     if (unsubHoursClocks) unsubHoursClocks();
     const r = hoursRange();
+    const p = payPeriod();
     unsubHoursCrews = db.collection('crews')
       .where('date', '>=', r.start).where('date', '<=', r.end)
       .onSnapshot(function (s) {
         hoursCrews = s.docs.map(d => Object.assign({ id: d.id }, d.data())).filter(d => d.ended !== true);
         renderHours();
       }, function () { toast('Could not load crew history.'); });
+    // Fetch the whole pay period so paychecks can be computed exactly
     unsubHoursClocks = db.collection('timeclock')
-      .where('date', '>=', r.start).where('date', '<=', r.end)
+      .where('date', '>=', p.start < r.start ? p.start : r.start)
+      .where('date', '<=', p.end > r.end ? p.end : r.end)
       .onSnapshot(function (s) {
         hoursClocks = s.docs.map(d => d.data());
         renderHours();
@@ -2178,8 +2239,9 @@
     const filterUid = hoursFilterVal.startsWith('uid:') ? hoursFilterVal.slice(4) : null;
     const filterCrew = hoursFilterVal.startsWith('crew:') ? hoursFilterVal.slice(5) : null;
 
-    // Per-date structures with the filter applied
-    const dates = [...new Set(hoursClocks.map(t => t.date).concat(hoursCrews.map(c => c.date)))].sort().reverse();
+    // Per-date structures with the filter applied (day list shows only the week)
+    const dates = [...new Set(hoursClocks.map(t => t.date).concat(hoursCrews.map(c => c.date)))]
+      .filter(dd => dd >= r.start && dd <= r.end).sort().reverse();
     const perDate = {};
     dates.forEach(function (date) {
       let dayCrews = hoursCrews.filter(c => c.date === date);
@@ -2240,38 +2302,124 @@
         t.className = 't';
         t.textContent = fmtDur(totals[uid].worked);
         rowS.appendChild(t);
-        const pay = payFor(uid, totals[uid].worked);
-        if (pay) {
+        const wg = grossFor(uid, totals[uid].worked);
+        if (wg !== null) {
           const p = document.createElement('span');
           p.className = 'pay';
-          p.innerHTML = fmtMoney(pay.gross) + ' gross<br><span class="net">' + fmtMoney(pay.net) + ' after tax</span>';
-          if (pay.taxPct === 0) p.innerHTML = fmtMoney(pay.gross) + ' gross<br><span style="color:var(--text-faint)">no tax % set</span>';
+          p.innerHTML = '<span class="net">' + fmtMoney(wg) + '</span> this week';
           rowS.appendChild(p);
         }
         card.appendChild(rowS);
       });
-      // Company totals for the shown people
-      let gGross = 0, gNet = 0, anyPay = false;
+      let wGross = 0, anyW = false;
       totalUids.forEach(function (uid) {
-        const pay = payFor(uid, totals[uid].worked);
-        if (pay) { anyPay = true; gGross += pay.gross; gNet += pay.net; }
+        const wg = grossFor(uid, totals[uid].worked);
+        if (wg !== null) { anyW = true; wGross += wg; }
       });
-      if (anyPay) {
+      if (anyW) {
         const grand = document.createElement('div');
         grand.className = 'hrs-grand';
         const lbl = document.createElement('span');
         lbl.className = 'lbl';
-        lbl.textContent = 'Total';
+        lbl.textContent = 'Week gross';
         grand.appendChild(lbl);
         const amt = document.createElement('span');
-        amt.innerHTML = fmtMoney(gGross) + ' gross · <span class="net">' + fmtMoney(gNet) + ' after tax</span>';
+        amt.textContent = fmtMoney(wGross);
         grand.appendChild(amt);
         card.appendChild(grand);
-        const noteT = document.createElement('div');
-        noteT.className = 'hrs-taxnote';
-        noteT.textContent = 'After-tax figures are estimates from each person’s tax % — set them under “$ Rates & taxes”. Not actual payroll withholding.';
-        card.appendChild(noteT);
       }
+      sum.appendChild(card);
+    }
+
+    // ── Paycheck: the 2-week pay period containing this week, taxed exactly ──
+    const pp = payPeriod();
+    const allowed = new Set();
+    if (filterUid) allowed.add(filterUid);
+    else if (filterCrew) {
+      hoursCrews.filter(c => (c.name || 'Crew') === filterCrew)
+        .forEach(c => (c.members || []).forEach(uid => allowed.add(uid)));
+    } else {
+      hoursClocks.forEach(t => allowed.add(t.uid));
+    }
+    const periodAgg = {};   // uid -> { worked, wk1, wk2 }
+    hoursClocks.forEach(function (t) {
+      if (t.date < pp.start || t.date > pp.end || !allowed.has(t.uid)) return;
+      if (!periodAgg[t.uid]) periodAgg[t.uid] = { worked: 0, wk1: 0, wk2: 0 };
+      const w = docWorkedMs(t);
+      periodAgg[t.uid].worked += w;
+      if (t.date < pp.mid) periodAgg[t.uid].wk1 += w; else periodAgg[t.uid].wk2 += w;
+    });
+    const payUids = Object.keys(periodAgg)
+      .filter(uid => grossFor(uid, periodAgg[uid].worked) > 0)
+      .sort((a, b) => periodAgg[b].worked - periodAgg[a].worked);
+    if (payUids.length) {
+      const fmtShort = k => { const q = k.split('-'); return +q[1] + '/' + +q[2]; };
+      const card = document.createElement('div');
+      card.className = 'hrs-summary';
+      const h = document.createElement('h4');
+      h.textContent = 'Paycheck · pay period ' + fmtShort(pp.start) + ' – ' + fmtShort(pp.end);
+      card.appendChild(h);
+      let tGross = 0, tNet = 0;
+      payUids.forEach(function (uid) {
+        const emp = byId[uid] || { name: '(removed)', color: '#9e9e9e' };
+        const agg = periodAgg[uid];
+        const weeksWorked = (agg.wk1 > 0 ? 1 : 0) + (agg.wk2 > 0 ? 1 : 0);
+        const chk = calcPaycheck(grossFor(uid, agg.worked), weeksWorked);
+        tGross += chk.gross; tNet += chk.net;
+        const rowS = document.createElement('div');
+        rowS.className = 'hrs-sumrow';
+        rowS.style.cursor = 'pointer';
+        rowS.title = 'Tap for the tax breakdown';
+        const init = document.createElement('span');
+        init.className = 'initials';
+        init.textContent = initials(emp.name);
+        init.style.background = empColor(emp);
+        init.style.color = contrastText(empColor(emp));
+        rowS.appendChild(init);
+        const n = document.createElement('span');
+        n.className = 'n';
+        n.textContent = emp.name;
+        rowS.appendChild(n);
+        const b = document.createElement('span');
+        b.className = 'b';
+        b.textContent = fmtDur(agg.worked)
+          + ' (wk1 ' + fmtDur(agg.wk1) + ' · wk2 ' + fmtDur(agg.wk2) + ')';
+        rowS.appendChild(b);
+        const p = document.createElement('span');
+        p.className = 'pay';
+        p.innerHTML = fmtMoney(chk.gross) + ' gross<br><span class="net">' + fmtMoney(chk.net) + ' net</span>';
+        rowS.appendChild(p);
+        rowS.addEventListener('click', function () {
+          paycheckOpen[uid] = !paycheckOpen[uid];
+          renderHours();
+        });
+        card.appendChild(rowS);
+        if (paycheckOpen[uid]) {
+          const det = document.createElement('div');
+          det.className = 'hrs-taxnote';
+          det.style.cssText = 'font-size:11px;color:var(--text-dim);margin:0 0 8px 34px;line-height:1.7';
+          det.innerHTML =
+            'Federal ' + fmtMoney(chk.fed) + ' · Social Security ' + fmtMoney(chk.oasdi)
+            + ' · Medicare ' + fmtMoney(chk.medicare) + '<br>NY State ' + fmtMoney(chk.ny)
+            + ' · NY SDI ' + fmtMoney(chk.sdi) + ' · NYS Paid Family Leave ' + fmtMoney(chk.pfl)
+            + '<br>Total taxes ' + fmtMoney(chk.taxes);
+          card.appendChild(det);
+        }
+      });
+      const grand = document.createElement('div');
+      grand.className = 'hrs-grand';
+      const lbl = document.createElement('span');
+      lbl.className = 'lbl';
+      lbl.textContent = 'Period total';
+      grand.appendChild(lbl);
+      const amt = document.createElement('span');
+      amt.innerHTML = fmtMoney(tGross) + ' gross · <span class="net">' + fmtMoney(tNet) + ' net</span>';
+      grand.appendChild(amt);
+      card.appendChild(grand);
+      const noteT = document.createElement('div');
+      noteT.className = 'hrs-taxnote';
+      noteT.textContent = 'Withheld like the company paychecks: federal & NY State (Single/0, biweekly), Social Security, Medicare, NY SDI, NYS PFL. Tap a person for their breakdown.';
+      card.appendChild(noteT);
       sum.appendChild(card);
     }
 
