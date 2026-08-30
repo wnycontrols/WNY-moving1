@@ -65,6 +65,10 @@ service cloud.firestore {
     match /workers/{id} {
       allow read, write: if isAdmin();
     }
+    // Pay rates and tax estimates: admin-only (never visible to employees).
+    match /payroll/{id} {
+      allow read, write: if isAdmin();
+    }
 
     match /{document=**} {
       allow read, write: if false;

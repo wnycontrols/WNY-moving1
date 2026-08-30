@@ -252,6 +252,26 @@
   .hrs-sumrow .n { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .hrs-sumrow .t { font-weight: 700; font-variant-numeric: tabular-nums; }
   .hrs-sumrow .b { color: var(--text-faint); font-size: 11px; }
+  .hrs-sumrow .pay { font-size: 11px; color: var(--text-dim); text-align: right; line-height: 1.5; font-variant-numeric: tabular-nums; }
+  .hrs-sumrow .pay .net { color: #69f0ae; font-weight: 700; }
+  .hrs-grand {
+    border-top: 1px solid var(--border-strong); margin-top: 8px; padding-top: 10px;
+    display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap;
+    font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums;
+  }
+  .hrs-grand .lbl { font-size: 11px; letter-spacing: 2px; text-transform: uppercase; color: var(--text-dim); font-weight: 700; }
+  .hrs-grand .net { color: #69f0ae; }
+  .hrs-taxnote { font-size: 10px; color: var(--text-faint); margin-top: 6px; }
+
+  .pay-row { display: flex; align-items: center; gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--border); }
+  .pay-row:last-child { border-bottom: none; }
+  .pay-row .initials {
+    width: 26px; height: 26px; border-radius: 50%; flex: none;
+    display: inline-flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 700;
+  }
+  .pay-row .n { flex: 1; font-size: 13px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pay-row .fld { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text-faint); flex: none; }
+  .pay-row input { width: 64px; padding: 8px 6px; font-size: 14px; min-height: 40px; text-align: right; }
 
   .hrs-day { border: 1px solid var(--border-strong); background: var(--panel); margin-bottom: 10px; }
   .hrs-dayhead {
@@ -674,6 +694,7 @@
     </div>
     <div class="hoursbar">
       <select id="hoursFilter" title="Filter hours"></select>
+      <button type="button" class="ghost" id="payrollBtn">$ Rates &amp; taxes</button>
     </div>
     <div id="hoursSummary"></div>
     <div id="hoursList"></div>
@@ -716,6 +737,18 @@
       <button type="submit" class="primary">Save</button>
     </div>
   </form>
+</div>
+
+<!-- ═══ Rates & taxes modal ═══ -->
+<div class="modal" id="payrollModal">
+  <h3>Rates &amp; taxes</h3>
+  <div class="note" style="margin-bottom:4px">Set each person's hourly rate and an estimated total tax percentage (Social Security + Medicare is 7.65%; with federal and NY state withholding, 20–25% is typical). The after-tax numbers are estimates for planning — not actual payroll withholding.</div>
+  <div id="payrollRows"></div>
+  <div class="form-msg" id="payrollMsg"></div>
+  <div class="form-actions">
+    <button type="button" id="payrollCancel">Cancel</button>
+    <button type="button" class="primary" id="payrollSave">Save</button>
+  </div>
 </div>
 
 <!-- ═══ Edit clock times modal ═══ -->
@@ -833,6 +866,8 @@
   let dayEndedAt = null;
   let workers = [];            // clock-only people without accounts
   let unsubWorkers = null;
+  let payrollMap = {};         // { uid: { rate, taxPct } } — admin-only
+  let unsubPayroll = null;
   let pendingProfile = null;   // { name, inviteCode } captured at signup
   let showInactive = false;    // admin: reveal the inactive-employees section
   const COLLAPSE_KEY = 'wny-team-collapsed';
@@ -974,6 +1009,7 @@
     if (unsubHoursCrews) { unsubHoursCrews(); unsubHoursCrews = null; }
     if (unsubHoursClocks) { unsubHoursClocks(); unsubHoursClocks = null; }
     if (unsubWorkers) { unsubWorkers(); unsubWorkers = null; }
+    if (unsubPayroll) { unsubPayroll(); unsubPayroll = null; }
     closeSheet(); closeModal();
   }
 
@@ -989,6 +1025,11 @@
         workers = s.docs.map(d => Object.assign({ id: d.id, worker: true }, d.data()));
         workers.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
         renderCrews();
+        renderHours();
+      }, function () { /* not fatal */ });
+      unsubPayroll = db.collection('payroll').onSnapshot(function (s) {
+        payrollMap = {};
+        s.forEach(function (d) { payrollMap[d.id] = d.data(); });
         renderHours();
       }, function () { /* not fatal */ });
     }
@@ -1148,8 +1189,95 @@
     $('settingsModal').classList.remove('open');
     $('patternModal').classList.remove('open');
     $('clockModal').classList.remove('open');
+    $('payrollModal').classList.remove('open');
     $('modalOverlay').classList.remove('open');
   }
+
+  // ── Rates & taxes (admin) ──
+  function fmtMoney(x) {
+    return '$' + x.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+  function payFor(uid, workedMs) {
+    const p = payrollMap[uid];
+    if (!p || !(p.rate > 0)) return null;
+    const gross = (workedMs / 3600000) * p.rate;
+    const taxPct = p.taxPct > 0 ? p.taxPct : 0;
+    return { gross: gross, net: gross * (1 - taxPct / 100), taxPct: taxPct };
+  }
+
+  let payrollDraft = {};       // { uid: { rate: 'str', taxPct: 'str' } }
+
+  $('payrollBtn').addEventListener('click', function () {
+    const people = employees.filter(isActiveEmp).concat(workers)
+      .sort((a, b) => a.name.localeCompare(b.name));
+    payrollDraft = {};
+    const wrap = $('payrollRows');
+    wrap.innerHTML = '';
+    people.forEach(function (emp) {
+      const cur = payrollMap[emp.id] || {};
+      payrollDraft[emp.id] = {
+        rate: cur.rate > 0 ? String(cur.rate) : '',
+        taxPct: cur.taxPct > 0 ? String(cur.taxPct) : ''
+      };
+      const row = document.createElement('div');
+      row.className = 'pay-row';
+      const init = document.createElement('span');
+      init.className = 'initials';
+      init.textContent = initials(emp.name);
+      init.style.background = empColor(emp);
+      init.style.color = contrastText(empColor(emp));
+      row.appendChild(init);
+      const n = document.createElement('span');
+      n.className = 'n';
+      n.textContent = emp.name + (emp.worker ? ' (clock only)' : '');
+      row.appendChild(n);
+      const f1 = document.createElement('label');
+      f1.className = 'fld';
+      f1.appendChild(document.createTextNode('$'));
+      const rateI = document.createElement('input');
+      rateI.type = 'text';
+      rateI.inputMode = 'decimal';
+      rateI.placeholder = '0.00';
+      rateI.value = payrollDraft[emp.id].rate;
+      rateI.addEventListener('input', function () { payrollDraft[emp.id].rate = rateI.value; });
+      f1.appendChild(rateI);
+      f1.appendChild(document.createTextNode('/hr'));
+      row.appendChild(f1);
+      const f2 = document.createElement('label');
+      f2.className = 'fld';
+      const taxI = document.createElement('input');
+      taxI.type = 'text';
+      taxI.inputMode = 'decimal';
+      taxI.placeholder = '20';
+      taxI.value = payrollDraft[emp.id].taxPct;
+      taxI.addEventListener('input', function () { payrollDraft[emp.id].taxPct = taxI.value; });
+      f2.appendChild(taxI);
+      f2.appendChild(document.createTextNode('% tax'));
+      row.appendChild(f2);
+      wrap.appendChild(row);
+    });
+    $('payrollMsg').textContent = '';
+    $('payrollModal').classList.add('open');
+    $('modalOverlay').classList.add('open');
+  });
+  $('payrollCancel').addEventListener('click', closeModal);
+  $('payrollSave').addEventListener('click', function () {
+    const writes = [];
+    for (const uid of Object.keys(payrollDraft)) {
+      const d = payrollDraft[uid];
+      const rate = d.rate.trim() === '' ? 0 : parseFloat(d.rate);
+      const taxPct = d.taxPct.trim() === '' ? 0 : parseFloat(d.taxPct);
+      if (isNaN(rate) || rate < 0 || rate > 1000) { $('payrollMsg').textContent = 'Hourly rates must be numbers between 0 and 1000.'; return; }
+      if (isNaN(taxPct) || taxPct < 0 || taxPct > 60) { $('payrollMsg').textContent = 'Tax percentages must be numbers between 0 and 60.'; return; }
+      const cur = payrollMap[uid] || {};
+      if ((cur.rate || 0) !== rate || (cur.taxPct || 0) !== taxPct) {
+        writes.push(db.doc('payroll/' + uid).set({ rate: rate, taxPct: taxPct }));
+      }
+    }
+    Promise.all(writes)
+      .then(function () { closeModal(); toast(writes.length ? 'Rates saved.' : 'No changes.'); })
+      .catch(function () { $('payrollMsg').textContent = 'Could not save rates.'; });
+  });
 
   // ── Edit clock times (admin) ──
   let clockEditTarget = null;   // { uid, date, doc }
@@ -2112,8 +2240,38 @@
         t.className = 't';
         t.textContent = fmtDur(totals[uid].worked);
         rowS.appendChild(t);
+        const pay = payFor(uid, totals[uid].worked);
+        if (pay) {
+          const p = document.createElement('span');
+          p.className = 'pay';
+          p.innerHTML = fmtMoney(pay.gross) + ' gross<br><span class="net">' + fmtMoney(pay.net) + ' after tax</span>';
+          if (pay.taxPct === 0) p.innerHTML = fmtMoney(pay.gross) + ' gross<br><span style="color:var(--text-faint)">no tax % set</span>';
+          rowS.appendChild(p);
+        }
         card.appendChild(rowS);
       });
+      // Company totals for the shown people
+      let gGross = 0, gNet = 0, anyPay = false;
+      totalUids.forEach(function (uid) {
+        const pay = payFor(uid, totals[uid].worked);
+        if (pay) { anyPay = true; gGross += pay.gross; gNet += pay.net; }
+      });
+      if (anyPay) {
+        const grand = document.createElement('div');
+        grand.className = 'hrs-grand';
+        const lbl = document.createElement('span');
+        lbl.className = 'lbl';
+        lbl.textContent = 'Total';
+        grand.appendChild(lbl);
+        const amt = document.createElement('span');
+        amt.innerHTML = fmtMoney(gGross) + ' gross · <span class="net">' + fmtMoney(gNet) + ' after tax</span>';
+        grand.appendChild(amt);
+        card.appendChild(grand);
+        const noteT = document.createElement('div');
+        noteT.className = 'hrs-taxnote';
+        noteT.textContent = 'After-tax figures are estimates from each person’s tax % — set them under “$ Rates & taxes”. Not actual payroll withholding.';
+        card.appendChild(noteT);
+      }
       sum.appendChild(card);
     }
 
