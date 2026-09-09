@@ -2311,23 +2311,22 @@
         }
         card.appendChild(rowS);
       });
-      let wGross = 0, anyW = false;
+      let wGross = 0, anyW = false, wHours = 0;
       totalUids.forEach(function (uid) {
+        wHours += totals[uid].worked;
         const wg = grossFor(uid, totals[uid].worked);
         if (wg !== null) { anyW = true; wGross += wg; }
       });
-      if (anyW) {
-        const grand = document.createElement('div');
-        grand.className = 'hrs-grand';
-        const lbl = document.createElement('span');
-        lbl.className = 'lbl';
-        lbl.textContent = 'Week gross';
-        grand.appendChild(lbl);
-        const amt = document.createElement('span');
-        amt.textContent = fmtMoney(wGross);
-        grand.appendChild(amt);
-        card.appendChild(grand);
-      }
+      const grand = document.createElement('div');
+      grand.className = 'hrs-grand';
+      const lbl = document.createElement('span');
+      lbl.className = 'lbl';
+      lbl.textContent = 'Week total';
+      grand.appendChild(lbl);
+      const amt = document.createElement('span');
+      amt.textContent = fmtDur(wHours) + (anyW ? ' · ' + fmtMoney(wGross) + ' gross' : '');
+      grand.appendChild(amt);
+      card.appendChild(grand);
       sum.appendChild(card);
     }
 
