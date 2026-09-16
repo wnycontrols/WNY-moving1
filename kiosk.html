@@ -180,6 +180,7 @@
 
 <div class="screen" id="adminView">
   <h2>Kiosk Manager</h2>
+  <div id="scanDiag" style="text-align:center;font-size:12px;color:var(--text-faint);margin-top:2px"></div>
   <div id="stagedTag" style="display:none"></div>
   <div id="adminList"></div>
   <div class="adminbar">
@@ -387,20 +388,32 @@
   }
 
   // ── RFID keyboard-wedge capture ──
-  let scanBuf = '', scanTimer = null;
+  // Works with readers that end the number with Enter, with Tab, or with
+  // nothing at all (the buffer auto-submits after a short pause).
+  let scanBuf = '', scanTimer = null, lastRead = null;
   document.addEventListener('keydown', function (e) {
     if ($('signinView').classList.contains('on')) return;   // typing credentials
-    if (e.key === 'Enter') {
-      if (scanBuf.length >= 4) handleScan(scanBuf);
-      scanBuf = '';
+    if ($('pinView').classList.contains('on')) return;      // don't hijack PIN entry
+    if (e.key === 'Enter' || e.key === 'Tab') {
+      e.preventDefault();
+      finishScan();
       return;
     }
     if (/^[0-9A-Za-z]$/.test(e.key)) {
       scanBuf += e.key;
       clearTimeout(scanTimer);
-      scanTimer = setTimeout(function () { scanBuf = ''; }, 400);
+      scanTimer = setTimeout(finishScan, 500);
     }
   });
+  function finishScan() {
+    clearTimeout(scanTimer);
+    const tag = scanBuf;
+    scanBuf = '';
+    if (!tag) return;
+    lastRead = tag;
+    if ($('adminView').classList.contains('on')) renderAdmin();
+    if (tag.length >= 4) handleScan(tag);
+  }
 
   function handleScan(tag) {
     if (assignWaitUid) { assignTag(tag, assignWaitUid); return; }
@@ -552,6 +565,9 @@
     });
   }
   function renderAdmin() {
+    $('scanDiag').textContent = lastRead
+      ? 'Scanner check ✓ — last read “' + lastRead + '” (' + lastRead.length + ' characters)'
+      : 'Scanner check: scan any fob now — its number should appear here.';
     const staged = $('stagedTag');
     if (stagedTag) {
       staged.style.display = '';
