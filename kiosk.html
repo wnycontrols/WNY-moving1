@@ -1,0 +1,622 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#000000">
+<title>WNY Moving — Time Clock</title>
+<style>
+  :root {
+    --bg: #000; --panel: #0d0d0d; --panel-2: #161616;
+    --border: #2a2a2a; --border-strong: #3d3d3d;
+    --text: #fff; --text-dim: #9a9a9a; --text-faint: #5c5c5c;
+    --green: #69f0ae; --amber: #ffd600; --danger: #ff5252;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; user-select: none; }
+  html, body { height: 100%; overflow: hidden; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    cursor: none;
+  }
+  body.admin-mode { cursor: auto; }
+  .screen {
+    position: absolute; inset: 0; display: none;
+    flex-direction: column; align-items: center; justify-content: center;
+    padding: 20px; text-align: center;
+  }
+  .screen.on { display: flex; }
+  button {
+    background: transparent; color: var(--text);
+    border: 2px solid var(--border-strong);
+    font-family: inherit; cursor: pointer;
+  }
+  .logo {
+    border: 3px solid var(--text); font-weight: 800; letter-spacing: 2px;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+
+  /* ── Sign-in ── */
+  #signinView form { width: 100%; max-width: 380px; text-align: left; }
+  #signinView input {
+    width: 100%; background: var(--panel); border: 1px solid var(--border-strong);
+    color: var(--text); padding: 14px; font-size: 16px; margin-top: 6px; font-family: inherit;
+  }
+  #signinView label { font-size: 12px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; display: block; margin-top: 16px; }
+  #signinView button { width: 100%; min-height: 54px; font-size: 16px; font-weight: 700; margin-top: 22px; background: var(--text); color: var(--bg); border-color: var(--text); }
+  #signinView .alt { background: none; border: none; color: var(--text-dim); text-decoration: underline; font-size: 13px; min-height: 40px; margin-top: 6px; }
+  .msg { color: var(--danger); font-size: 13px; min-height: 18px; margin-top: 12px; }
+
+  /* ── Idle ── */
+  #bigTime { font-size: 88px; font-weight: 800; letter-spacing: 2px; font-variant-numeric: tabular-nums; line-height: 1; }
+  #bigDate { font-size: 20px; color: var(--text-dim); margin-top: 8px; }
+  #scanPrompt {
+    margin-top: 44px; font-size: 26px; font-weight: 800; letter-spacing: 6px; text-transform: uppercase;
+    border: 2px dashed var(--border-strong); padding: 22px 38px; color: var(--text-dim);
+    animation: pulse 2.4s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%,100% { opacity: 0.55; } 50% { opacity: 1; } }
+  #onClockStrip { position: absolute; bottom: 18px; left: 18px; right: 70px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  #onClockStrip .lbl { font-size: 10px; letter-spacing: 2px; text-transform: uppercase; color: var(--text-faint); margin-right: 4px; }
+  .chip-init {
+    width: 34px; height: 34px; border-radius: 50%;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 800; border: 2px solid transparent;
+  }
+  .chip-init.brk { border-color: var(--amber); opacity: 0.8; }
+  #gearBtn {
+    position: absolute; bottom: 12px; right: 12px;
+    border: none; color: var(--text-faint); font-size: 22px; padding: 12px; min-width: 48px; min-height: 48px;
+  }
+
+  /* ── Person ── */
+  #personView .who { display: flex; align-items: center; gap: 18px; margin-bottom: 6px; }
+  #personInit { width: 76px; height: 76px; border-radius: 50%; font-size: 26px; font-weight: 800; display: inline-flex; align-items: center; justify-content: center; }
+  #personName { font-size: 40px; font-weight: 800; }
+  #personStatus { font-size: 19px; color: var(--text-dim); margin: 10px 0 34px; line-height: 1.6; }
+  #personStatus .live { color: var(--green); font-weight: 800; }
+  #personStatus .brk { color: var(--amber); font-weight: 800; }
+  .bigbtns { display: flex; gap: 18px; width: 100%; max-width: 640px; }
+  .bigbtns button {
+    flex: 1; min-height: 130px; font-size: 26px; font-weight: 800; letter-spacing: 2px; text-transform: uppercase;
+  }
+  .bigbtns .in { background: var(--text); color: var(--bg); border-color: var(--text); }
+  .bigbtns .out { border-color: var(--text); }
+  .bigbtns .brkb { border-color: var(--amber); color: var(--amber); font-size: 20px; flex: 0.7; }
+  #personBack { margin-top: 26px; border: none; color: var(--text-faint); font-size: 15px; min-height: 48px; text-decoration: underline; }
+  #dayEndedNote { font-size: 22px; color: var(--text-dim); border: 1px solid var(--border-strong); padding: 24px 30px; }
+
+  /* ── Confirm ── */
+  #confirmView .check { font-size: 90px; line-height: 1; }
+  #confirmMsg { font-size: 30px; font-weight: 800; margin-top: 18px; }
+  #confirmSub { font-size: 18px; color: var(--text-dim); margin-top: 10px; }
+
+  /* ── Unknown tag ── */
+  #unknownView .x { font-size: 80px; color: var(--danger); line-height: 1; }
+  #unknownView h2 { font-size: 28px; margin-top: 16px; }
+  #unknownView p { color: var(--text-dim); margin-top: 10px; font-size: 17px; }
+  #assignThisBtn { margin-top: 28px; min-height: 56px; padding: 0 26px; font-size: 15px; }
+
+  /* ── PIN pad ── */
+  #pinTitle { font-size: 20px; font-weight: 700; margin-bottom: 6px; }
+  #pinDots { font-size: 34px; letter-spacing: 10px; min-height: 46px; color: var(--text); }
+  .pinpad { display: grid; grid-template-columns: repeat(3, 86px); gap: 12px; margin-top: 16px; }
+  .pinpad button { min-height: 66px; font-size: 24px; font-weight: 700; border-radius: 8px; }
+  #pinCancel { margin-top: 20px; border: none; color: var(--text-faint); text-decoration: underline; min-height: 44px; font-size: 14px; }
+
+  /* ── Admin ── */
+  #adminView { justify-content: flex-start; padding-top: 16px; overflow-y: auto; text-align: left; align-items: stretch; }
+  #adminView h2 { font-size: 20px; text-align: center; margin-bottom: 4px; }
+  #stagedTag {
+    border: 1px dashed var(--amber); color: var(--amber);
+    padding: 10px 14px; font-size: 14px; margin: 10px auto; text-align: center; max-width: 560px; width: 100%;
+  }
+  #adminList { max-width: 640px; margin: 6px auto; width: 100%; }
+  .arow {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 6px; border-bottom: 1px solid var(--border); min-height: 62px;
+  }
+  .arow .chip-init { width: 38px; height: 38px; }
+  .arow .nm { flex: 1; font-size: 17px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .arow .tag { font-size: 12px; color: var(--text-faint); font-variant-numeric: tabular-nums; }
+  .arow button { min-height: 46px; padding: 0 16px; font-size: 13px; }
+  .arow button.assign { background: var(--text); color: var(--bg); border-color: var(--text); font-weight: 700; }
+  .adminbar { display: flex; gap: 10px; justify-content: center; margin: 16px 0 30px; flex-wrap: wrap; }
+  .adminbar button { min-height: 50px; padding: 0 18px; font-size: 14px; }
+  .waiting { color: var(--amber); }
+</style>
+</head>
+<body>
+
+<div class="screen" id="signinView">
+  <div class="logo" style="width:64px;height:64px;font-size:20px;margin-bottom:20px">WNY</div>
+  <h1 style="font-size:22px;margin-bottom:4px">Time Clock Setup</h1>
+  <p style="color:var(--text-dim);font-size:14px;max-width:380px">Sign in with the kiosk admin login. Add its email under ⚙ Admin Emails in the main app first.</p>
+  <form id="signinForm">
+    <label>Kiosk email</label><input type="email" id="kEmail" autocomplete="username">
+    <label>Password</label><input type="password" id="kPass" autocomplete="current-password">
+    <div class="msg" id="signinMsg"></div>
+    <button type="submit">Start Kiosk</button>
+    <button type="button" class="alt" id="createBtn">First time? Create this kiosk login</button>
+  </form>
+</div>
+
+<div class="screen" id="idleView">
+  <div class="logo" style="width:54px;height:54px;font-size:16px;position:absolute;top:18px;left:18px">WNY</div>
+  <div id="bigTime">—</div>
+  <div id="bigDate"></div>
+  <div id="scanPrompt">Scan your tag</div>
+  <div id="onClockStrip"></div>
+  <button id="gearBtn">⚙</button>
+</div>
+
+<div class="screen" id="personView">
+  <div class="who"><span id="personInit"></span><span id="personName"></span></div>
+  <div id="personStatus"></div>
+  <div class="bigbtns" id="personBtns"></div>
+  <div id="dayEndedNote" style="display:none">The day has been ended — see a manager.</div>
+  <button id="personBack">Cancel</button>
+</div>
+
+<div class="screen" id="confirmView">
+  <div class="check" id="confirmIcon">✓</div>
+  <div id="confirmMsg"></div>
+  <div id="confirmSub"></div>
+</div>
+
+<div class="screen" id="unknownView">
+  <div class="x">✕</div>
+  <h2>Tag not recognized</h2>
+  <p>Ask a manager to assign your tag.</p>
+  <button id="assignThisBtn">Manager: assign this tag</button>
+</div>
+
+<div class="screen" id="pinView">
+  <div id="pinTitle">Manager PIN</div>
+  <div id="pinDots"></div>
+  <div class="pinpad" id="pinPad"></div>
+  <button id="pinCancel">Cancel</button>
+</div>
+
+<div class="screen" id="adminView">
+  <h2>Kiosk Manager</h2>
+  <div id="stagedTag" style="display:none"></div>
+  <div id="adminList"></div>
+  <div class="adminbar">
+    <button id="changePinBtn">Change PIN</button>
+    <button id="openAppBtn">Open full app</button>
+    <button id="adminCloseBtn" style="background:var(--text);color:var(--bg);border-color:var(--text);font-weight:700">Done</button>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="firebase-config.js"></script>
+<script>
+(function () {
+  'use strict';
+  const $ = id => document.getElementById(id);
+  const SCREENS = ['signinView', 'idleView', 'personView', 'confirmView', 'unknownView', 'pinView', 'adminView'];
+  function show(v) {
+    SCREENS.forEach(s => $(s).classList.toggle('on', s === v));
+    document.body.classList.toggle('admin-mode', v === 'adminView' || v === 'signinView' || v === 'pinView');
+  }
+  const DOW = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+  if (!window.FIREBASE_CONFIG || /PASTE/i.test(window.FIREBASE_CONFIG.apiKey || '')) {
+    document.body.innerHTML = '<div style="padding:40px;font-size:18px">firebase-config.js is not set up.</div>';
+    return;
+  }
+  firebase.initializeApp(window.FIREBASE_CONFIG);
+  const auth = firebase.auth();
+  const db = firebase.firestore();
+  if (window.FIREBASE_EMULATORS) {
+    auth.useEmulator(window.FIREBASE_EMULATORS.authUrl, { disableWarnings: true });
+    db.useEmulator(window.FIREBASE_EMULATORS.firestoreHost, window.FIREBASE_EMULATORS.firestorePort);
+  }
+
+  // ── State ──
+  let people = {};          // uid -> {name, color, worker}
+  let rfidMap = {};         // tag -> uid
+  let kioskPin = null;
+  let clockMap = {};        // uid -> timeclock doc for today
+  let dayEnded = false;
+  let today = todayKey();
+  let currentUid = null;
+  let stagedTag = null;     // unknown tag waiting for assignment
+  let assignWaitUid = null; // person row waiting for a scan
+  let pinBuf = '', pinMode = 'enter', pinFirst = null; // enter | set1 | set2
+  let personTimer = null, confirmTimer = null;
+  let unsubs = [];
+
+  function todayKey() {
+    const t = new Date();
+    return t.getFullYear() + '-' + String(t.getMonth() + 1).padStart(2, '0') + '-' + String(t.getDate()).padStart(2, '0');
+  }
+  function initials(name) { return (name || '?').trim().split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase(); }
+  function contrastText(hex) {
+    if (!/^#[0-9a-f]{6}$/i.test(hex || '')) return '#fff';
+    const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
+    return (0.299 * r + 0.587 * g + 0.114 * b) > 140 ? '#000' : '#fff';
+  }
+  function fmtClock(ms) { return new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); }
+  function fmtDur(ms) { const m = Math.floor(ms / 60000); return Math.floor(m / 60) + 'h ' + String(m % 60).padStart(2, '0') + 'm'; }
+
+  function clockDoc(uid) { return clockMap[uid] || { sessions: [], onBreak: false, breakStart: null, breakMs: 0 }; }
+  function openSession(uid) { return (clockDoc(uid).sessions || []).find(s => !s.out) || null; }
+  function onBreak(uid) { return clockDoc(uid).onBreak === true; }
+  function totalBreakMs(uid) {
+    const d = clockDoc(uid);
+    return (d.breakMs || 0) + (d.onBreak && d.breakStart ? Date.now() - d.breakStart : 0);
+  }
+  function totalWorkedMs(uid) {
+    const onClock = (clockDoc(uid).sessions || []).reduce((s, x) => s + ((x.out || Date.now()) - x.in), 0);
+    return Math.max(0, onClock - totalBreakMs(uid));
+  }
+  function writeClock(uid, doc) {
+    return db.collection('timeclock').doc(uid + '_' + today).set(Object.assign({ uid: uid, date: today }, doc));
+  }
+  function doClockIn(uid) {
+    const d = clockDoc(uid);
+    if (d.onBreak) return doEndBreak(uid);
+    if (openSession(uid)) return Promise.resolve();
+    return writeClock(uid, { sessions: (d.sessions || []).concat([{ in: Date.now(), out: null }]), onBreak: false, breakStart: null, breakMs: d.breakMs || 0 });
+  }
+  function doClockOut(uid) {
+    const d = clockDoc(uid);
+    const cut = d.onBreak && d.breakStart ? d.breakStart : Date.now();
+    const sessions = (d.sessions || []).map(s => s.out ? s : { in: s.in, out: cut });
+    return writeClock(uid, { sessions: sessions, onBreak: false, breakStart: null, breakMs: d.breakMs || 0 });
+  }
+  function doStartBreak(uid) {
+    const d = clockDoc(uid);
+    if (!openSession(uid) || d.onBreak) return Promise.resolve();
+    return writeClock(uid, { sessions: d.sessions || [], onBreak: true, breakStart: Date.now(), breakMs: d.breakMs || 0 });
+  }
+  function doEndBreak(uid) {
+    const d = clockDoc(uid);
+    if (!d.onBreak) return Promise.resolve();
+    return writeClock(uid, { sessions: d.sessions || [], onBreak: false, breakStart: null, breakMs: (d.breakMs || 0) + (d.breakStart ? Date.now() - d.breakStart : 0) });
+  }
+
+  // ── Sign-in ──
+  $('signinForm').addEventListener('submit', function (e) {
+    e.preventDefault();
+    $('signinMsg').textContent = '';
+    auth.signInWithEmailAndPassword($('kEmail').value.trim(), $('kPass').value)
+      .catch(err => { $('signinMsg').textContent = friendly(err); });
+  });
+  $('createBtn').addEventListener('click', function () {
+    $('signinMsg').textContent = '';
+    auth.createUserWithEmailAndPassword($('kEmail').value.trim(), $('kPass').value)
+      .catch(err => { $('signinMsg').textContent = friendly(err); });
+  });
+  function friendly(e) {
+    const c = (e && e.code) || '';
+    if (c.includes('invalid-credential') || c.includes('wrong-password') || c.includes('user-not-found')) return 'Wrong email or password.';
+    if (c.includes('email-already-in-use')) return 'Login exists — use Start Kiosk.';
+    if (c.includes('weak-password')) return 'Password needs 6+ characters.';
+    if (c.includes('network')) return 'No internet connection.';
+    return (e && e.message) || 'Something went wrong.';
+  }
+
+  auth.onAuthStateChanged(function (user) {
+    unsubs.forEach(u => u()); unsubs = [];
+    if (!user) { show('signinView'); return; }
+    startKiosk();
+  });
+
+  function subscribeDay() {
+    // (re)subscribe today's clock + day-end marker
+    unsubs = unsubs.filter(u => !u._daily || (u(), false));
+    const u1 = db.collection('timeclock').where('date', '==', today).onSnapshot(function (s) {
+      clockMap = {};
+      s.forEach(d => { const x = d.data(); clockMap[x.uid] = x; });
+      renderIdleStrip();
+      if (currentUid) renderPerson();
+    }, permFail);
+    const u2 = db.collection('crews').where('date', '==', today).onSnapshot(function (s) {
+      dayEnded = s.docs.some(d => d.data().ended === true);
+      if (currentUid) renderPerson();
+    }, function () {});
+    u1._daily = true; u2._daily = true;
+    unsubs.push(u1, u2);
+  }
+  function permFail() {
+    show('signinView');
+    $('signinMsg').textContent = 'This login is not an admin. Add its email under ⚙ Admin Emails in the main app, then sign in again.';
+    auth.signOut();
+  }
+
+  function startKiosk() {
+    unsubs.push(db.collection('employees').onSnapshot(function (s) {
+      s.forEach(d => {
+        const x = d.data();
+        if (x.active !== false) people[d.id] = { name: x.name, color: x.color || '#fff' };
+        else delete people[d.id];
+      });
+      renderIdleStrip();
+      if ($('adminView').classList.contains('on')) renderAdmin();
+    }, permFail));
+    unsubs.push(db.collection('workers').onSnapshot(function (s) {
+      s.forEach(d => { const x = d.data(); people[d.id] = { name: x.name, color: x.color || '#fff', worker: true }; });
+      if ($('adminView').classList.contains('on')) renderAdmin();
+    }, function () {}));
+    unsubs.push(db.collection('payroll').onSnapshot(function (s) {
+      rfidMap = {}; kioskPin = null;
+      s.forEach(d => {
+        if (d.id === '_config') kioskPin = d.data().kioskPin || null;
+        else if (d.id.indexOf('rfid_') === 0) rfidMap[d.id.slice(5)] = d.data().uid;
+      });
+      if ($('adminView').classList.contains('on')) renderAdmin();
+    }, function () {}));
+    subscribeDay();
+    show('idleView');
+    if (navigator.wakeLock) navigator.wakeLock.request('screen').catch(function () {});
+  }
+
+  // ── Clock face ──
+  function tickClock() {
+    const n = new Date();
+    $('bigTime').textContent = n.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' });
+    $('bigDate').textContent = DOW[n.getDay()] + ', ' + MONTHS[n.getMonth()] + ' ' + n.getDate();
+    if (todayKey() !== today) { today = todayKey(); subscribeDay(); } // midnight rollover
+  }
+  tickClock();
+  setInterval(tickClock, 1000);
+
+  function renderIdleStrip() {
+    const strip = $('onClockStrip');
+    strip.innerHTML = '';
+    const on = Object.keys(clockMap).filter(uid => people[uid] && (openSession(uid) || onBreak(uid)));
+    if (!on.length) return;
+    const lbl = document.createElement('span');
+    lbl.className = 'lbl';
+    lbl.textContent = 'On the clock';
+    strip.appendChild(lbl);
+    on.forEach(function (uid) {
+      const c = document.createElement('span');
+      c.className = 'chip-init' + (onBreak(uid) ? ' brk' : '');
+      c.textContent = initials(people[uid].name);
+      c.style.background = people[uid].color;
+      c.style.color = contrastText(people[uid].color);
+      strip.appendChild(c);
+    });
+  }
+
+  // ── RFID keyboard-wedge capture ──
+  let scanBuf = '', scanTimer = null;
+  document.addEventListener('keydown', function (e) {
+    if ($('signinView').classList.contains('on')) return;   // typing credentials
+    if (e.key === 'Enter') {
+      if (scanBuf.length >= 4) handleScan(scanBuf);
+      scanBuf = '';
+      return;
+    }
+    if (/^[0-9A-Za-z]$/.test(e.key)) {
+      scanBuf += e.key;
+      clearTimeout(scanTimer);
+      scanTimer = setTimeout(function () { scanBuf = ''; }, 400);
+    }
+  });
+
+  function handleScan(tag) {
+    if (assignWaitUid) { assignTag(tag, assignWaitUid); return; }
+    if ($('adminView').classList.contains('on')) { stageTag(tag); renderAdmin(); return; }
+    const uid = rfidMap[tag];
+    if (uid && people[uid]) openPerson(uid);
+    else { stagedTag = tag; show('unknownView'); autoIdle(12000); }
+  }
+  function stageTag(tag) { stagedTag = tag; }
+
+  // ── Person screen (their profile only) ──
+  function openPerson(uid) {
+    currentUid = uid;
+    renderPerson();
+    show('personView');
+    autoIdle(25000);
+  }
+  function autoIdle(ms) {
+    clearTimeout(personTimer);
+    personTimer = setTimeout(goIdle, ms);
+  }
+  function goIdle() {
+    currentUid = null; stagedTag = null; assignWaitUid = null;
+    clearTimeout(personTimer); clearTimeout(confirmTimer);
+    show('idleView');
+  }
+  $('personBack').addEventListener('click', goIdle);
+
+  function renderPerson() {
+    const uid = currentUid;
+    if (!uid || !people[uid]) return;
+    const p = people[uid];
+    $('personInit').textContent = initials(p.name);
+    $('personInit').style.background = p.color;
+    $('personInit').style.color = contrastText(p.color);
+    $('personName').textContent = p.name;
+    const open = openSession(uid), brk = onBreak(uid);
+    const total = totalWorkedMs(uid), brkT = totalBreakMs(uid);
+    let st;
+    if (brk) st = '<span class="brk">⏸ On break</span> since ' + fmtClock(clockDoc(uid).breakStart) + '<br>worked ' + fmtDur(total) + ' today';
+    else if (open) st = '<span class="live">● On the clock</span> since ' + fmtClock(open.in) + '<br>' + fmtDur(total) + ' today' + (brkT ? ' · break ' + fmtDur(brkT) : '');
+    else if (total > 0) st = fmtDur(total) + ' today · clocked out';
+    else st = 'Not clocked in today';
+    $('personStatus').innerHTML = st;
+
+    const btns = $('personBtns');
+    btns.innerHTML = '';
+    $('dayEndedNote').style.display = dayEnded ? '' : 'none';
+    if (dayEnded) return;
+
+    function act(label, cls, fn, doneMsg) {
+      const b = document.createElement('button');
+      b.className = cls;
+      b.textContent = label;
+      b.addEventListener('click', function () {
+        clearTimeout(personTimer);
+        fn(uid).then(function () { confirmDone(doneMsg, p.name); })
+          .catch(function () { confirmFail(); });
+      });
+      btns.appendChild(b);
+    }
+    if (brk) {
+      act('End break', 'in', doEndBreak, 'Back on the clock');
+      act('Clock out', 'out', doClockOut, 'Clocked out');
+    } else if (open) {
+      act('Break', 'brkb', doStartBreak, 'On break');
+      act('Clock out', 'out', doClockOut, 'Clocked out');
+    } else {
+      act(total > 0 ? 'Clock back in' : 'Clock in', 'in', doClockIn, 'Clocked in');
+    }
+  }
+
+  function confirmDone(msg, name) {
+    $('confirmIcon').textContent = '✓';
+    $('confirmIcon').style.color = 'var(--green)';
+    $('confirmMsg').textContent = msg + ' — ' + name;
+    $('confirmSub').textContent = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    show('confirmView');
+    clearTimeout(confirmTimer);
+    confirmTimer = setTimeout(goIdle, 3200);
+  }
+  function confirmFail() {
+    $('confirmIcon').textContent = '✕';
+    $('confirmIcon').style.color = 'var(--danger)';
+    $('confirmMsg').textContent = 'Didn’t save — try again';
+    $('confirmSub').textContent = 'Check the internet connection';
+    show('confirmView');
+    clearTimeout(confirmTimer);
+    confirmTimer = setTimeout(goIdle, 3200);
+  }
+
+  // ── Unknown tag → manager assign ──
+  $('assignThisBtn').addEventListener('click', function () { openPin(function () { show('adminView'); renderAdmin(); }); });
+
+  // ── PIN ──
+  let pinOk = null;
+  function openPin(onOk) {
+    pinOk = onOk; pinBuf = ''; pinFirst = null;
+    pinMode = kioskPin ? 'enter' : 'set1';
+    renderPin();
+    show('pinView');
+  }
+  function renderPin() {
+    $('pinTitle').textContent = pinMode === 'enter' ? 'Manager PIN'
+      : pinMode === 'set1' ? 'Set a manager PIN (4–8 digits)' : 'Type the PIN again';
+    $('pinDots').textContent = '●'.repeat(pinBuf.length);
+    const pad = $('pinPad');
+    pad.innerHTML = '';
+    ['1','2','3','4','5','6','7','8','9','⌫','0','OK'].forEach(function (k) {
+      const b = document.createElement('button');
+      b.textContent = k;
+      b.addEventListener('click', function () {
+        if (k === '⌫') pinBuf = pinBuf.slice(0, -1);
+        else if (k === 'OK') return pinSubmit();
+        else if (pinBuf.length < 8) pinBuf += k;
+        $('pinDots').textContent = '●'.repeat(pinBuf.length);
+      });
+      pad.appendChild(b);
+    });
+  }
+  function pinSubmit() {
+    if (pinMode === 'enter') {
+      if (pinBuf === kioskPin) { const f = pinOk; pinBuf = ''; f && f(); }
+      else { pinBuf = ''; $('pinTitle').textContent = 'Wrong PIN — try again'; $('pinDots').textContent = ''; }
+      return;
+    }
+    if (pinBuf.length < 4) { $('pinTitle').textContent = 'PIN needs at least 4 digits'; return; }
+    if (pinMode === 'set1') { pinFirst = pinBuf; pinBuf = ''; pinMode = 'set2'; renderPin(); return; }
+    if (pinBuf !== pinFirst) { pinBuf = ''; pinFirst = null; pinMode = 'set1'; renderPin(); $('pinTitle').textContent = 'Didn’t match — start over'; return; }
+    db.doc('payroll/_config').set({ kioskPin: pinBuf }, { merge: true })
+      .then(function () { const f = pinOk; pinBuf = ''; f && f(); });
+  }
+  $('pinCancel').addEventListener('click', goIdle);
+  $('gearBtn').addEventListener('click', function () { openPin(function () { show('adminView'); renderAdmin(); }); });
+
+  // ── Admin panel ──
+  function tagOf(uid) {
+    for (const t of Object.keys(rfidMap)) if (rfidMap[t] === uid) return t;
+    return null;
+  }
+  function assignTag(tag, uid) {
+    const old = tagOf(uid);
+    const batch = db.batch();
+    if (old) batch.delete(db.doc('payroll/rfid_' + old));
+    batch.set(db.doc('payroll/rfid_' + tag), { uid: uid });
+    batch.commit().then(function () {
+      stagedTag = null; assignWaitUid = null;
+      renderAdmin();
+    });
+  }
+  function renderAdmin() {
+    const staged = $('stagedTag');
+    if (stagedTag) {
+      staged.style.display = '';
+      staged.textContent = 'Scanned tag ' + stagedTag + ' — tap a person to assign it';
+    } else if (assignWaitUid && people[assignWaitUid]) {
+      staged.style.display = '';
+      staged.innerHTML = '<span class="waiting">Waiting for a scan…</span> scan the tag for ' + people[assignWaitUid].name;
+    } else staged.style.display = 'none';
+
+    const list = $('adminList');
+    list.innerHTML = '';
+    Object.keys(people).sort((a, b) => people[a].name.localeCompare(people[b].name)).forEach(function (uid) {
+      const p = people[uid];
+      const row = document.createElement('div');
+      row.className = 'arow';
+      const c = document.createElement('span');
+      c.className = 'chip-init';
+      c.textContent = initials(p.name);
+      c.style.background = p.color;
+      c.style.color = contrastText(p.color);
+      row.appendChild(c);
+      const nm = document.createElement('span');
+      nm.className = 'nm';
+      nm.textContent = p.name + (p.worker ? ' (clock only)' : '');
+      row.appendChild(nm);
+      const t = tagOf(uid);
+      const tg = document.createElement('span');
+      tg.className = 'tag';
+      tg.textContent = t ? 'tag …' + t.slice(-4) : 'no tag';
+      row.appendChild(tg);
+      if (stagedTag) {
+        const b = document.createElement('button');
+        b.className = 'assign';
+        b.textContent = 'Assign tag';
+        b.addEventListener('click', function () { assignTag(stagedTag, uid); });
+        row.appendChild(b);
+      } else if (t) {
+        const b = document.createElement('button');
+        b.textContent = 'Remove';
+        b.addEventListener('click', function () {
+          db.doc('payroll/rfid_' + t).delete();
+        });
+        row.appendChild(b);
+      } else {
+        const b = document.createElement('button');
+        b.textContent = assignWaitUid === uid ? 'Scan now…' : 'Assign tag';
+        if (assignWaitUid === uid) b.classList.add('assign');
+        b.addEventListener('click', function () {
+          assignWaitUid = assignWaitUid === uid ? null : uid;
+          renderAdmin();
+        });
+        row.appendChild(b);
+      }
+      list.appendChild(row);
+    });
+  }
+  $('adminCloseBtn').addEventListener('click', goIdle);
+  $('changePinBtn').addEventListener('click', function () {
+    kioskPin = null;
+    openPin(function () { show('adminView'); renderAdmin(); });
+  });
+  $('openAppBtn').addEventListener('click', function () { window.location.href = 'index.html'; });
+
+  document.addEventListener('contextmenu', e => e.preventDefault());
+})();
+</script>
+</body>
+</html>

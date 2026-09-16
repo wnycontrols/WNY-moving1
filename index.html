@@ -1039,6 +1039,7 @@
         let cfg = null;
         s.forEach(function (d) {
           if (d.id === '_config') cfg = d.data();
+          else if (d.id.indexOf('rfid_') === 0) { /* kiosk tag mappings, not rates */ }
           else payrollMap[d.id] = d.data();
         });
         const anchorChanged = (cfg && cfg.anchor) !== (payConfig && payConfig.anchor);
@@ -1300,7 +1301,7 @@
     const anchor = $('setAnchor').value;
     if (!/^\d{4}-\d{2}-\d{2}$/.test(anchor)) { $('payrollMsg').textContent = 'Pick a pay period start date.'; return; }
     if (anchor !== ((payConfig && payConfig.anchor) || '')) {
-      writes.push(db.doc('payroll/_config').set({ anchor: anchor }));
+      writes.push(db.doc('payroll/_config').set({ anchor: anchor }, { merge: true }));
     }
     for (const uid of Object.keys(payrollDraft)) {
       const d = payrollDraft[uid];
