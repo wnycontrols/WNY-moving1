@@ -83,8 +83,29 @@
   .bigbtns .in { background: var(--text); color: var(--bg); border-color: var(--text); }
   .bigbtns .out { border-color: var(--text); }
   .bigbtns .brkb { border-color: var(--amber); color: var(--amber); font-size: 20px; flex: 0.7; }
-  #personBack { margin-top: 26px; border: none; color: var(--text-faint); font-size: 15px; min-height: 48px; text-decoration: underline; }
+  #personBack { margin-top: 10px; border: none; color: var(--text-faint); font-size: 15px; min-height: 48px; text-decoration: underline; }
+  #myHoursBtn { margin-top: 26px; min-height: 56px; padding: 0 28px; font-size: 16px; font-weight: 700; }
   #dayEndedNote { font-size: 22px; color: var(--text-dim); border: 1px solid var(--border-strong); padding: 24px 30px; }
+
+  /* ── My hours ── */
+  #hoursView { justify-content: flex-start; padding-top: 18px; overflow-y: auto; }
+  #hoursPeriod { font-size: 12px; letter-spacing: 2px; text-transform: uppercase; color: var(--text-dim); margin: 6px 0 10px; }
+  #hoursDays { width: 100%; max-width: 620px; text-align: left; }
+  .hday {
+    display: flex; align-items: baseline; gap: 12px;
+    padding: 9px 4px; border-bottom: 1px solid var(--border); font-size: 15px;
+  }
+  .hday .d { width: 92px; flex: none; font-weight: 700; }
+  .hday .t { flex: 1; color: var(--text-dim); font-size: 12px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hday .w { font-weight: 800; font-variant-numeric: tabular-nums; flex: none; }
+  .hday.wk { border-bottom: none; justify-content: flex-end; color: var(--text-dim); font-size: 12px; padding: 6px 4px 14px; }
+  .hday.wk .w { color: var(--text); font-size: 14px; }
+  #hoursTotals {
+    margin: 14px 0 6px; font-size: 18px; font-weight: 800;
+    border-top: 2px solid var(--border-strong); padding-top: 12px; width: 100%; max-width: 620px;
+  }
+  #hoursBack { margin: 14px 0 26px; min-height: 54px; padding: 0 34px; font-size: 16px; font-weight: 700; background: var(--text); color: var(--bg); border-color: var(--text); }
+  .hempty { color: var(--text-faint); font-size: 14px; padding: 22px 4px; }
 
   /* ── Confirm ── */
   #confirmView .check { font-size: 90px; line-height: 1; }
@@ -155,7 +176,16 @@
   <div id="personStatus"></div>
   <div class="bigbtns" id="personBtns"></div>
   <div id="dayEndedNote" style="display:none">The day has been ended — see a manager.</div>
+  <button id="myHoursBtn">View my hours</button>
   <button id="personBack">Cancel</button>
+</div>
+
+<div class="screen" id="hoursView">
+  <div class="who" style="margin-bottom:2px"><span id="hoursInit"></span><span id="hoursName" style="font-size:26px;font-weight:800"></span></div>
+  <div id="hoursPeriod"></div>
+  <div id="hoursDays"></div>
+  <div id="hoursTotals"></div>
+  <button id="hoursBack">Done</button>
 </div>
 
 <div class="screen" id="confirmView">
@@ -198,7 +228,7 @@
 (function () {
   'use strict';
   const $ = id => document.getElementById(id);
-  const SCREENS = ['signinView', 'idleView', 'personView', 'confirmView', 'unknownView', 'pinView', 'adminView'];
+  const SCREENS = ['signinView', 'idleView', 'personView', 'confirmView', 'unknownView', 'pinView', 'adminView', 'hoursView'];
   function show(v) {
     SCREENS.forEach(s => $(s).classList.toggle('on', s === v));
     document.body.classList.toggle('admin-mode', v === 'adminView' || v === 'signinView' || v === 'pinView');
@@ -230,6 +260,7 @@
   let assignWaitUid = null; // person row waiting for a scan
   let pinBuf = '', pinMode = 'enter', pinFirst = null; // enter | set1 | set2
   let personTimer = null, confirmTimer = null;
+  let payAnchor = '2026-01-04'; // pay periods count in 2-week steps from this Sunday
   let unsubs = [];
 
   function todayKey() {
@@ -375,7 +406,7 @@
     unsubs.push(db.collection('payroll').onSnapshot(function (s) {
       rfidMap = {}; kioskPin = null;
       s.forEach(d => {
-        if (d.id === '_config') kioskPin = d.data().kioskPin || null;
+        if (d.id === '_config') { kioskPin = d.data().kioskPin || null; payAnchor = d.data().anchor || payAnchor; }
         else if (d.id.indexOf('rfid_') === 0) rfidMap[d.id.slice(5)] = d.data().uid;
       });
       if ($('adminView').classList.contains('on')) renderAdmin();
@@ -468,6 +499,94 @@
     show('idleView');
   }
   $('personBack').addEventListener('click', goIdle);
+
+  // ── My hours: the person's own current pay period ──
+  function payPeriod() {
+    const a = payAnchor.split('-');
+    const anchor = new Date(+a[0], +a[1] - 1, +a[2]);
+    anchor.setDate(anchor.getDate() - anchor.getDay()); // snap to Sunday
+    const t = today.split('-');
+    const weekStart = new Date(+t[0], +t[1] - 1, +t[2]);
+    weekStart.setDate(weekStart.getDate() - weekStart.getDay());
+    const weeks = Math.round((weekStart - anchor) / 604800000);
+    const startWk = weeks - ((weeks % 2) + 2) % 2;
+    const start = new Date(anchor);
+    start.setDate(start.getDate() + startWk * 7);
+    const mid = new Date(start); mid.setDate(mid.getDate() + 7);
+    const end = new Date(start); end.setDate(end.getDate() + 13);
+    const key = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    return { start: key(start), mid: key(mid), end: key(end), startD: start, endD: end };
+  }
+  function docWorked(t) {
+    const live = t.date === today;
+    const onClock = (t.sessions || []).reduce((s, x) => s + ((x.out || (live ? Date.now() : x.in)) - x.in), 0);
+    const brk = (t.breakMs || 0) + (live && t.onBreak && t.breakStart ? Date.now() - t.breakStart : 0);
+    return Math.max(0, onClock - brk);
+  }
+  function showMyHours(uid) {
+    const p = people[uid];
+    if (!p) return;
+    clearTimeout(personTimer);
+    $('hoursInit').textContent = initials(p.name);
+    $('hoursInit').className = 'chip-init';
+    $('hoursInit').style.background = p.color;
+    $('hoursInit').style.color = contrastText(p.color);
+    $('hoursName').textContent = p.name;
+    const pp = payPeriod();
+    const fmtShort = d => (d.getMonth() + 1) + '/' + d.getDate();
+    $('hoursPeriod').textContent = 'Pay period ' + fmtShort(pp.startD) + ' – ' + fmtShort(pp.endD);
+    $('hoursDays').innerHTML = '<div class="hempty">Loading…</div>';
+    $('hoursTotals').textContent = '';
+    show('hoursView');
+    autoIdle(45000);
+    db.collection('timeclock').where('date', '>=', pp.start).where('date', '<=', pp.end).get()
+      .then(function (s) {
+        const mine = [];
+        s.forEach(d => { const x = d.data(); if (x.uid === uid) mine.push(x); });
+        mine.sort((a, b) => a.date < b.date ? -1 : 1);
+        const wrap = $('hoursDays');
+        wrap.innerHTML = '';
+        if (!mine.length) {
+          wrap.innerHTML = '<div class="hempty">No hours recorded this pay period yet.</div>';
+          return;
+        }
+        let wk1 = 0, wk2 = 0, wk1Shown = false;
+        function weekRow(label, ms) {
+          const r = document.createElement('div');
+          r.className = 'hday wk';
+          r.innerHTML = label + '&nbsp; <span class="w">' + fmtDur(ms) + '</span>';
+          wrap.appendChild(r);
+        }
+        mine.forEach(function (t, i) {
+          if (!wk1Shown && t.date >= pp.mid) {
+            if (wk1 > 0) weekRow('Week 1 total', wk1);
+            wk1Shown = true;
+          }
+          const q = t.date.split('-');
+          const dObj = new Date(+q[0], +q[1] - 1, +q[2]);
+          const worked = docWorked(t);
+          if (t.date < pp.mid) wk1 += worked; else wk2 += worked;
+          const row = document.createElement('div');
+          row.className = 'hday';
+          const times = (t.sessions || []).map(x => fmtClock(x.in) + '–' + (x.out ? fmtClock(x.out) : 'now')).join(', ');
+          const brk = (t.breakMs || 0) > 0 ? ' · break ' + fmtDur(t.breakMs) : '';
+          row.innerHTML = '<span class="d">' + DOW[dObj.getDay()].slice(0, 3) + ' ' + (dObj.getMonth() + 1) + '/' + dObj.getDate() + '</span>'
+            + '<span class="t">' + times + brk + '</span>'
+            + '<span class="w">' + fmtDur(worked) + '</span>';
+          wrap.appendChild(row);
+          if (i === mine.length - 1) {
+            if (!wk1Shown && wk1 > 0) weekRow('Week 1 total', wk1);
+            if (wk2 > 0) weekRow('Week 2 total', wk2);
+          }
+        });
+        $('hoursTotals').textContent = 'Pay period total: ' + fmtDur(wk1 + wk2);
+      })
+      .catch(function () {
+        $('hoursDays').innerHTML = '<div class="hempty">Couldn’t load — check the internet connection.</div>';
+      });
+  }
+  $('myHoursBtn').addEventListener('click', function () { if (currentUid) showMyHours(currentUid); });
+  $('hoursBack').addEventListener('click', goIdle);
 
   function renderPerson() {
     const uid = currentUid;
