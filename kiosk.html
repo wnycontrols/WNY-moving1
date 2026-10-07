@@ -256,30 +256,57 @@
     const onClock = (clockDoc(uid).sessions || []).reduce((s, x) => s + ((x.out || Date.now()) - x.in), 0);
     return Math.max(0, onClock - totalBreakMs(uid));
   }
-  function writeClock(uid, doc) {
-    return db.collection('timeclock').doc(uid + '_' + today).set(Object.assign({ uid: uid, date: today }, doc));
+  // Clock changes run as transactions against the current database state,
+  // so rapid taps can never lose a shift or leave one running unseen.
+  function clockTx(uid, mutate) {
+    const ref = db.collection('timeclock').doc(uid + '_' + today);
+    const date = today;
+    return db.runTransaction(function (txn) {
+      return txn.get(ref).then(function (snap) {
+        const d = snap.exists ? snap.data() : {};
+        const cur = {
+          sessions: (d.sessions || []).slice(),
+          onBreak: d.onBreak === true,
+          breakStart: d.breakStart || null,
+          breakMs: d.breakMs || 0
+        };
+        const upd = mutate(cur);
+        if (upd) txn.set(ref, Object.assign({ uid: uid, date: date }, upd));
+      });
+    });
   }
   function doClockIn(uid) {
-    const d = clockDoc(uid);
-    if (d.onBreak) return doEndBreak(uid);
-    if (openSession(uid)) return Promise.resolve();
-    return writeClock(uid, { sessions: (d.sessions || []).concat([{ in: Date.now(), out: null }]), onBreak: false, breakStart: null, breakMs: d.breakMs || 0 });
+    return clockTx(uid, function (d) {
+      if (d.onBreak) {
+        return { sessions: d.sessions, onBreak: false, breakStart: null,
+                 breakMs: d.breakMs + (d.breakStart ? Date.now() - d.breakStart : 0) };
+      }
+      if (d.sessions.some(s => !s.out)) return null;
+      return { sessions: d.sessions.concat([{ in: Date.now(), out: null }]),
+               onBreak: false, breakStart: null, breakMs: d.breakMs };
+    });
   }
   function doClockOut(uid) {
-    const d = clockDoc(uid);
-    const cut = d.onBreak && d.breakStart ? d.breakStart : Date.now();
-    const sessions = (d.sessions || []).map(s => s.out ? s : { in: s.in, out: cut });
-    return writeClock(uid, { sessions: sessions, onBreak: false, breakStart: null, breakMs: d.breakMs || 0 });
+    return clockTx(uid, function (d) {
+      if (!d.sessions.length && !d.onBreak) return null;
+      // Clocking out during a break: the day ended when the break started.
+      const cut = d.onBreak && d.breakStart ? d.breakStart : Date.now();
+      return { sessions: d.sessions.map(s => s.out ? s : { in: s.in, out: cut }),
+               onBreak: false, breakStart: null, breakMs: d.breakMs };
+    });
   }
   function doStartBreak(uid) {
-    const d = clockDoc(uid);
-    if (!openSession(uid) || d.onBreak) return Promise.resolve();
-    return writeClock(uid, { sessions: d.sessions || [], onBreak: true, breakStart: Date.now(), breakMs: d.breakMs || 0 });
+    return clockTx(uid, function (d) {
+      if (d.onBreak || !d.sessions.some(s => !s.out)) return null;
+      return { sessions: d.sessions, onBreak: true, breakStart: Date.now(), breakMs: d.breakMs };
+    });
   }
   function doEndBreak(uid) {
-    const d = clockDoc(uid);
-    if (!d.onBreak) return Promise.resolve();
-    return writeClock(uid, { sessions: d.sessions || [], onBreak: false, breakStart: null, breakMs: (d.breakMs || 0) + (d.breakStart ? Date.now() - d.breakStart : 0) });
+    return clockTx(uid, function (d) {
+      if (!d.onBreak) return null;
+      return { sessions: d.sessions, onBreak: false, breakStart: null,
+               breakMs: d.breakMs + (d.breakStart ? Date.now() - d.breakStart : 0) };
+    });
   }
 
   // ── Sign-in ──
