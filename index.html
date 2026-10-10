@@ -541,6 +541,60 @@
     border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 16px;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── My hours (every employee) ── */
+  .my-status {
+    border: 1px solid var(--border-strong); background: var(--panel);
+    padding: 16px; margin-bottom: 16px; text-align: center;
+  }
+  .my-status .st-state { font-size: 13px; letter-spacing: 2px; text-transform: uppercase; font-weight: 700; color: var(--text-dim); }
+  .my-status .st-state.live { color: #69f0ae; }
+  .my-status .st-state.brk { color: #ffd600; }
+  .my-status .st-big { font-size: 40px; font-weight: 800; font-variant-numeric: tabular-nums; margin: 6px 0 2px; }
+  .my-status .st-sub { font-size: 12px; color: var(--text-dim); line-height: 1.7; }
+  .self-actions { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-top: 14px; }
+  .self-actions button { min-height: 58px; font-size: 16px; font-weight: 700; padding: 10px 26px; flex: 1; max-width: 240px; }
+  .self-actions button:disabled { opacity: 0.5; cursor: default; }
+  .my-dayrow { display: flex; align-items: center; gap: 10px; padding: 10px 2px; border-bottom: 1px solid var(--border); font-size: 13px; }
+  .my-dayrow:last-child { border-bottom: none; }
+  .my-dayrow .d { width: 72px; flex: none; color: var(--text-dim); font-weight: 700; }
+  .my-dayrow .times { flex: 1; text-align: right; color: var(--text-dim); font-size: 11px; line-height: 1.5; min-width: 0; }
+  .my-dayrow .wt { font-weight: 700; font-variant-numeric: tabular-nums; flex: none; min-width: 58px; text-align: right; }
+  .my-dayrow .flag { border: none; background: none; color: var(--text-faint); font-size: 12px; min-height: 36px; padding: 4px 6px; flex: none; }
+  .my-dayrow .flag:hover { background: none; color: var(--text); }
+  .req-chip {
+    display: inline-block; font-size: 10px; letter-spacing: 0.5px; text-transform: uppercase;
+    border: 1px solid var(--border-strong); padding: 3px 8px; margin: 2px 0 6px 74px; color: var(--text-dim);
+  }
+  .req-chip.done { color: #69f0ae; border-color: #69f0ae55; }
+  .ok-tag { color: #69f0ae; font-weight: 700; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; }
+
+  /* ── Needs attention (admin) ── */
+  .attn {
+    border: 1px solid var(--danger); background: var(--panel);
+    padding: 12px 14px; margin-bottom: 16px;
+  }
+  .attn h4 { font-size: 11px; letter-spacing: 2px; text-transform: uppercase; color: var(--danger); margin-bottom: 8px; }
+  .attn-row { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--border); font-size: 13px; flex-wrap: wrap; }
+  .attn-row:last-child { border-bottom: none; }
+  .attn-row .w { flex: 1; min-width: 180px; line-height: 1.5; }
+  .attn-row .w .sub { color: var(--text-dim); font-size: 11px; }
+  .attn-row button { font-size: 11px; padding: 6px 12px; min-height: 36px; flex: none; }
+  .tab-badge {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 18px; height: 18px; border-radius: 9px; padding: 0 5px;
+    background: var(--danger); color: #fff; font-size: 10px; font-weight: 800;
+    margin-left: 6px; vertical-align: 1px;
+  }
+  .approve-btn { font-size: 10px; padding: 5px 10px; min-height: 32px; flex: none; }
+  .approve-btn.ok { border-color: #69f0ae55; color: #69f0ae; }
+  .approve-btn.ok:hover { background: transparent; color: #69f0ae; border-color: #69f0ae; }
+
+  /* Accessibility: visible keyboard focus, calm motion when asked */
+  :focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; animation: none !important; }
+  }
 </style>
 </head>
 <body>
@@ -634,6 +688,7 @@
 
   <div class="mainTabs" id="mainTabs" style="display:none">
     <button type="button" id="tabCalBtn" class="on">Calendar</button>
+    <button type="button" id="tabMyBtn" style="display:none">My hours</button>
     <button type="button" id="tabCrewsBtn">Crews &amp; Time Clock</button>
     <button type="button" id="tabHoursBtn">Hours</button>
   </div>
@@ -695,10 +750,24 @@
     </div>
     <div class="hoursbar">
       <select id="hoursFilter" title="Filter hours"></select>
+      <button type="button" class="ghost" id="exportBtn" title="Download this week as a spreadsheet file">&#8595; CSV</button>
       <button type="button" class="ghost" id="payrollBtn">$ Rates &amp; taxes</button>
     </div>
+    <div id="attnBox"></div>
     <div id="hoursSummary"></div>
     <div id="hoursList"></div>
+  </main>
+
+  <main id="myMain" style="display:none">
+    <div class="month-nav">
+      <button id="myPrevBtn" aria-label="Previous pay period">&#8592;</button>
+      <h2 id="myPeriodLabel"></h2>
+      <button id="myNextBtn" aria-label="Next pay period">&#8594;</button>
+      <button id="myTodayBtn">Today</button>
+    </div>
+    <div id="myStatus"></div>
+    <div id="mySummary"></div>
+    <div id="myList"></div>
   </main>
 </div>
 
@@ -724,6 +793,12 @@
     <label class="field" for="setMinStaff">Minimum people available per day (0 = off)</label>
     <input type="text" id="setMinStaff" inputmode="numeric" pattern="[0-9]*">
     <div class="note">Days from today onward with fewer available people get a red warning line and count, visible to the whole team. The weekly email also sends admins a staffing heads-up.</div>
+    <label class="field">Phone clock in</label>
+    <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer">
+      <input type="checkbox" id="setSelfClock" style="width:18px;height:18px;accent-color:#fff">
+      Let employees clock in and out from their own phones
+    </label>
+    <div class="note">Off (recommended to start): punches only happen at the kiosk or by an admin. On: everyone gets Clock in / Break / Clock out buttons on their "My hours" tab — handy for crews that leave straight from home.</div>
     <div id="hideMeBlock">
       <label class="field">My visibility</label>
       <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer">
@@ -783,7 +858,20 @@
   </div>
 </div>
 
-<div id="toast"></div>
+<!-- ═══ Report-a-problem modal (employees) ═══ -->
+<div class="modal" id="reqModal">
+  <h3>Report a problem</h3>
+  <div class="note" id="reqSub" style="margin-bottom:6px"></div>
+  <label class="field" for="reqText">What's wrong?</label>
+  <textarea id="reqText" rows="3" maxlength="400" placeholder="e.g. I worked until 5:30 but it shows 4:00"></textarea>
+  <div class="form-msg" id="reqMsg"></div>
+  <div class="form-actions">
+    <button type="button" id="reqCancel">Cancel</button>
+    <button type="button" class="primary" id="reqSend">Send to manager</button>
+  </div>
+</div>
+
+<div id="toast" role="status" aria-live="polite"></div>
 
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
@@ -878,6 +966,19 @@
   let paycheckOpen = {};       // uids with the tax breakdown expanded
   let pendingProfile = null;   // { name, inviteCode } captured at signup
   let showInactive = false;    // admin: reveal the inactive-employees section
+  let myStart = null;          // Date inside the pay period shown on "My hours"
+  let myClocks = [];           // own timeclock docs for that period
+  let myReqs = [];             // own correction requests
+  let myApprovals = {};        // { periodStart: approvalDoc } — own approved periods
+  let myCrewsToday = [];       // today's crew docs (to show "you're on Crew X" / day ended)
+  let myRate = null;           // own payroll doc (rate), readable by rules
+  let unsubMyClocks = null, unsubMyReqs = null, unsubMyApprovals = null,
+      unsubMyCrews = null, unsubMyRate = null;
+  let openReqs = [];           // admin: all open correction requests
+  let unsubReqs = null;
+  let periodApprovals = {};    // admin: { uid: approvalDoc } for the shown pay period
+  let unsubPeriodApprovals = null;
+  let selfBusy = false;        // a self clock action is saving
   const COLLAPSE_KEY = 'wny-team-collapsed';
   let teamCollapsed = localStorage.getItem(COLLAPSE_KEY) !== null
     ? localStorage.getItem(COLLAPSE_KEY) === '1'
@@ -922,9 +1023,18 @@
   function effState(emp, dayMarks, dow) {
     return dayMarks[emp.id] || patternState(emp, dow) || null;
   }
+  // "Today" is pinned to the company's time zone, so a phone with a wrong
+  // clock or a traveling device can never punch into the wrong day's record.
+  const APP_TZ = 'America/New_York';
   function todayKey() {
-    const t = new Date();
-    return dateKey(t.getFullYear(), t.getMonth(), t.getDate());
+    try {
+      return new Intl.DateTimeFormat('en-CA', {
+        timeZone: APP_TZ, year: 'numeric', month: '2-digit', day: '2-digit'
+      }).format(new Date());
+    } catch (e) {
+      const t = new Date();
+      return dateKey(t.getFullYear(), t.getMonth(), t.getDate());
+    }
   }
 
   let toastTimer = null;
@@ -1018,6 +1128,13 @@
     if (unsubHoursClocks) { unsubHoursClocks(); unsubHoursClocks = null; }
     if (unsubWorkers) { unsubWorkers(); unsubWorkers = null; }
     if (unsubPayroll) { unsubPayroll(); unsubPayroll = null; }
+    if (unsubMyClocks) { unsubMyClocks(); unsubMyClocks = null; }
+    if (unsubMyReqs) { unsubMyReqs(); unsubMyReqs = null; }
+    if (unsubMyApprovals) { unsubMyApprovals(); unsubMyApprovals = null; }
+    if (unsubMyCrews) { unsubMyCrews(); unsubMyCrews = null; }
+    if (unsubMyRate) { unsubMyRate(); unsubMyRate = null; }
+    if (unsubReqs) { unsubReqs(); unsubReqs = null; }
+    if (unsubPeriodApprovals) { unsubPeriodApprovals(); unsubPeriodApprovals = null; }
     closeSheet(); closeModal();
   }
 
@@ -1026,10 +1143,23 @@
     $('whoami').textContent = (me.email || '') + (isAdmin ? ' · admin' : '');
     $('settingsBtn').style.display = isAdmin ? '' : 'none';
     $('kioskBtn').style.display = isAdmin ? '' : 'none';
-    $('mainTabs').style.display = isAdmin ? '' : 'none';
+    $('mainTabs').style.display = '';
+    $('tabCrewsBtn').style.display = isAdmin ? '' : 'none';
+    $('tabHoursBtn').style.display = isAdmin ? '' : 'none';
+    $('tabMyBtn').style.display = isAdmin ? 'none' : '';
+    if (!isAdmin) {
+      // Everyone can follow their own hours, pay, and requests live.
+      subscribeMine();
+    }
     if (isAdmin) {
       if (!crewDate) crewDate = todayKey();
       subscribeCrews();
+      unsubReqs = db.collection('requests').where('status', '==', 'open').onSnapshot(function (s) {
+        openReqs = s.docs.map(d => Object.assign({ id: d.id }, d.data()));
+        openReqs.sort((a, b) => (a.created || 0) - (b.created || 0));
+        updateHoursBadge();
+        renderHours();
+      }, function () { /* not fatal */ });
       unsubWorkers = db.collection('workers').onSnapshot(function (s) {
         workers = s.docs.map(d => Object.assign({ id: d.id, worker: true }, d.data()));
         workers.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
@@ -1047,6 +1177,10 @@
         const anchorChanged = (cfg && cfg.anchor) !== (payConfig && payConfig.anchor);
         payConfig = cfg;
         if (anchorChanged && unsubHoursClocks) subscribeHours();
+        // Self-heal: keep the employee-readable anchor copy in sync
+        if (cfg && cfg.anchor && pubSettings && pubSettings.anchor !== cfg.anchor) {
+          db.doc('settings/public').set({ anchor: cfg.anchor }, { merge: true }).catch(function () {});
+        }
         renderHours();
       }, function () { /* not fatal */ });
     }
@@ -1196,6 +1330,7 @@
     $('setInvite').value = settings && settings.inviteCode || '';
     $('setAdmins').value = (settings && settings.adminEmails || []).join('\n');
     $('setMinStaff').value = String((pubSettings && pubSettings.minStaff) || 0);
+    $('setSelfClock').checked = !!(pubSettings && pubSettings.selfClock === true);
     const myEmp = employees.find(e => e.id === me.uid);
     $('hideMeBlock').style.display = myEmp ? '' : 'none';
     $('setHideMe').checked = !!(myEmp && myEmp.hidden === true);
@@ -1208,6 +1343,7 @@
     $('patternModal').classList.remove('open');
     $('clockModal').classList.remove('open');
     $('payrollModal').classList.remove('open');
+    $('reqModal').classList.remove('open');
     $('modalOverlay').classList.remove('open');
   }
 
@@ -1305,6 +1441,9 @@
     if (!/^\d{4}-\d{2}-\d{2}$/.test(anchor)) { $('payrollMsg').textContent = 'Pick a pay period start date.'; return; }
     if (anchor !== ((payConfig && payConfig.anchor) || '')) {
       writes.push(db.doc('payroll/_config').set({ anchor: anchor }, { merge: true }));
+      // Mirror the anchor where employees can read it, so their "My hours"
+      // pay periods line up with the real paychecks.
+      writes.push(db.doc('settings/public').set({ anchor: anchor }, { merge: true }));
     }
     for (const uid of Object.keys(payrollDraft)) {
       const d = payrollDraft[uid];
@@ -1419,8 +1558,14 @@
         breakMs: breakMin * 60000
       });
     }
-    op.then(function () { closeModal(); toast('Times updated.'); })
-      .catch(function () { $('clockMsg').textContent = 'Could not save the times.'; });
+    op.then(function () {
+      // Rewriting a day's times un-approves that person's pay period, so an
+      // approved paycheck can never change silently underneath the approval.
+      const ppT = periodOfDateStr(t.date);
+      db.doc('approvals/' + t.uid + '_' + ppT.start).delete().catch(function () { /* none existed */ });
+      closeModal();
+      toast('Times updated.');
+    }).catch(function () { $('clockMsg').textContent = 'Could not save the times.'; });
   });
   $('settingsCancel').addEventListener('click', closeModal);
   $('modalOverlay').addEventListener('click', closeModal);
@@ -1486,7 +1631,10 @@
     }
     const writes = [
       db.doc('settings/company').set({ inviteCode: invite, adminEmails: admins }),
-      db.doc('settings/public').set({ minStaff: minStaff })
+      db.doc('settings/public').set({
+        minStaff: minStaff,
+        selfClock: $('setSelfClock').checked
+      }, { merge: true })
     ];
     const myEmp = employees.find(e => e.id === me.uid);
     if (myEmp && $('hideMeBlock').style.display !== 'none') {
@@ -1639,19 +1787,23 @@
     $('tabCalBtn').classList.toggle('on', tab === 'calendar');
     $('tabCrewsBtn').classList.toggle('on', tab === 'crews');
     $('tabHoursBtn').classList.toggle('on', tab === 'hours');
+    $('tabMyBtn').classList.toggle('on', tab === 'my');
     $('calMain').style.display = tab === 'calendar' ? '' : 'none';
     $('crewsMain').style.display = tab === 'crews' ? '' : 'none';
     $('hoursMain').style.display = tab === 'hours' ? '' : 'none';
+    $('myMain').style.display = tab === 'my' ? '' : 'none';
     if (tab === 'crews') renderCrews();
     if (tab === 'hours') {
       if (!hoursStart) { hoursStart = new Date(); hoursStart.setDate(hoursStart.getDate() - hoursStart.getDay()); }
       if (!unsubHoursClocks) subscribeHours();
       renderHours();
     }
+    if (tab === 'my') renderMy();
   }
   $('tabCalBtn').addEventListener('click', function () { showTab('calendar'); });
   $('tabCrewsBtn').addEventListener('click', function () { showTab('crews'); });
   $('tabHoursBtn').addEventListener('click', function () { showTab('hours'); });
+  $('tabMyBtn').addEventListener('click', function () { showTab('my'); });
 
   function subscribeCrews() {
     if (unsubCrews) unsubCrews();
@@ -1720,7 +1872,11 @@
     return Math.max(0, onClock - totalBreakMs(uid));
   }
   function fmtClock(ms) {
-    return new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    try {
+      return new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', timeZone: APP_TZ });
+    } catch (e) {
+      return new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    }
   }
   function fmtDur(ms) {
     const m = Math.floor(ms / 60000);
@@ -1730,9 +1886,9 @@
   // state, never the screen's possibly-stale copy — so tapping clock-out
   // right after clock-in always finds the open shift and closes it at ~0
   // minutes instead of silently leaving it running all day.
-  function clockTx(uid, mutate) {
-    const ref = db.collection('timeclock').doc(uid + '_' + crewDate);
-    const date = crewDate;
+  function clockTx(uid, mutate, dateOpt) {
+    const date = dateOpt || crewDate;
+    const ref = db.collection('timeclock').doc(uid + '_' + date);
     return db.runTransaction(function (txn) {
       return txn.get(ref).then(function (snap) {
         const d = snap.exists ? snap.data() : {};
@@ -1745,9 +1901,10 @@
         const upd = mutate(cur);
         if (upd) txn.set(ref, Object.assign({ uid: uid, date: date }, upd));
       });
-    }).catch(function () { toast('Time clock change not saved.'); });
+    }).then(function () { return true; })
+      .catch(function () { toast('Time clock change not saved.'); return false; });
   }
-  function clockIn(uid) {
+  function clockIn(uid, dateOpt) {
     return clockTx(uid, function (d) {
       if (d.onBreak) {
         return { sessions: d.sessions, onBreak: false, breakStart: null,
@@ -1756,29 +1913,29 @@
       if (d.sessions.some(s => !s.out)) return null;
       return { sessions: d.sessions.concat([{ in: Date.now(), out: null }]),
                onBreak: false, breakStart: null, breakMs: d.breakMs };
-    });
+    }, dateOpt);
   }
-  function clockOut(uid) {
+  function clockOut(uid, dateOpt) {
     return clockTx(uid, function (d) {
       if (!d.sessions.length && !d.onBreak) return null;
       // Clocking out during a break: the day ended when the break started.
       const cut = d.onBreak && d.breakStart ? d.breakStart : Date.now();
       return { sessions: d.sessions.map(s => s.out ? s : { in: s.in, out: cut }),
                onBreak: false, breakStart: null, breakMs: d.breakMs };
-    });
+    }, dateOpt);
   }
-  function startBreak(uid) {
+  function startBreak(uid, dateOpt) {
     return clockTx(uid, function (d) {
       if (d.onBreak || !d.sessions.some(s => !s.out)) return null;
       return { sessions: d.sessions, onBreak: true, breakStart: Date.now(), breakMs: d.breakMs };
-    });
+    }, dateOpt);
   }
-  function endBreak(uid) {
+  function endBreak(uid, dateOpt) {
     return clockTx(uid, function (d) {
       if (!d.onBreak) return null;
       return { sessions: d.sessions, onBreak: false, breakStart: null,
                breakMs: d.breakMs + (d.breakStart ? Date.now() - d.breakStart : 0) };
-    });
+    }, dateOpt);
   }
 
   function updateCrew(id, fields) {
@@ -2136,12 +2293,19 @@
     };
   }
 
-  // The 2-week pay period containing the shown week, counted from the anchor
-  function payPeriod() {
-    const a = ((payConfig && payConfig.anchor) || DEFAULT_ANCHOR).split('-');
+  // Anchor date for pay periods: admins read payroll/_config; everyone else
+  // reads the mirrored copy in settings/public.
+  function anchorStr() {
+    return (payConfig && payConfig.anchor)
+      || (pubSettings && pubSettings.anchor)
+      || DEFAULT_ANCHOR;
+  }
+  // The 2-week pay period containing refDate, counted from the anchor
+  function periodOf(refDate) {
+    const a = anchorStr().split('-');
     const anchor = new Date(+a[0], +a[1] - 1, +a[2]);
     anchor.setDate(anchor.getDate() - anchor.getDay()); // snap to that week's Sunday
-    const weeks = Math.round((hoursStart - anchor) / 604800000);
+    const weeks = Math.round((refDate - anchor) / 604800000);
     const startWk = weeks - ((weeks % 2) + 2) % 2;
     const start = new Date(anchor);
     start.setDate(start.getDate() + startWk * 7);
@@ -2155,6 +2319,14 @@
       end: dateKey(end.getFullYear(), end.getMonth(), end.getDate()),
       startD: start, endD: end
     };
+  }
+  function payPeriod() { return periodOf(hoursStart); }
+  // Pay period containing a 'YYYY-MM-DD' date string
+  function periodOfDateStr(ds) {
+    const p = ds.split('-');
+    const d = new Date(+p[0], +p[1] - 1, +p[2]);
+    d.setDate(d.getDate() - d.getDay());
+    return periodOf(d);
   }
 
   function subscribeHours() {
@@ -2176,6 +2348,14 @@
         hoursClocks = s.docs.map(d => d.data());
         renderHours();
       }, function () { toast('Could not load saved hours.'); });
+    if (unsubPeriodApprovals) unsubPeriodApprovals();
+    unsubPeriodApprovals = db.collection('approvals')
+      .where('period', '==', p.start)
+      .onSnapshot(function (s) {
+        periodApprovals = {};
+        s.forEach(function (d) { const x = d.data(); periodApprovals[x.uid] = x; });
+        renderHours();
+      }, function () { /* not fatal */ });
   }
 
   function shiftHoursWeek(days) {
@@ -2226,6 +2406,8 @@
 
     const byId = {};
     employees.concat(workers).forEach(e => { byId[e.id] = e; });
+
+    renderAttention(byId);
 
     // Filter dropdown: Everyone / crew names in range / individual people
     const sel = $('hoursFilter');
@@ -2379,6 +2561,14 @@
       card.className = 'hrs-summary';
       const h = document.createElement('h4');
       h.textContent = 'Paycheck · pay period ' + fmtShort(pp.start) + ' – ' + fmtShort(pp.end);
+      const csvB = document.createElement('button');
+      csvB.type = 'button';
+      csvB.className = 'ghost';
+      csvB.textContent = '↓ Payroll CSV';
+      csvB.title = 'Download this pay period as a spreadsheet file';
+      csvB.style.cssText = 'float:right;margin-top:-8px;font-size:11px';
+      csvB.addEventListener('click', function () { exportPayrollCSV(pp, payUids, periodAgg, byId); });
+      h.appendChild(csvB);
       card.appendChild(h);
       let tGross = 0, tNet = 0;
       payUids.forEach(function (uid) {
@@ -2410,6 +2600,23 @@
         p.className = 'pay';
         p.innerHTML = fmtMoney(chk.gross) + ' gross<br><span class="net">' + fmtMoney(chk.net) + ' net</span>';
         rowS.appendChild(p);
+        const ap = periodApprovals[uid];
+        const apBtn = document.createElement('button');
+        apBtn.type = 'button';
+        apBtn.className = 'approve-btn' + (ap ? ' ok' : '');
+        apBtn.textContent = ap ? '✓' : 'Approve';
+        apBtn.title = ap
+          ? 'Approved' + (ap.by ? ' by ' + ap.by : '') + ' — tap to undo'
+          : 'Approve ' + emp.name + '’s paycheck for this period';
+        apBtn.addEventListener('click', function (e) {
+          e.stopPropagation();
+          const ref = db.doc('approvals/' + uid + '_' + pp.start);
+          const op = ap
+            ? ref.delete()
+            : ref.set({ uid: uid, period: pp.start, hours: agg.worked, by: me.email || '', at: Date.now() });
+          op.catch(function () { toast('Could not update the approval.'); });
+        });
+        rowS.appendChild(apBtn);
         rowS.addEventListener('click', function () {
           paycheckOpen[uid] = !paycheckOpen[uid];
           renderHours();
@@ -2568,11 +2775,482 @@
     });
   }
 
-  // Keep running timers fresh while the crews or hours tab is open
+  // ── Needs attention (admin): open shifts, correction requests, approvals ──
+  function fmtDateLabel(ds) {
+    const p = ds.split('-');
+    const d = new Date(+p[0], +p[1] - 1, +p[2]);
+    return DOW[d.getDay()] + ', ' + MONTHS[d.getMonth()] + ' ' + d.getDate();
+  }
+  function updateHoursBadge() {
+    const btn = $('tabHoursBtn');
+    let b = btn.querySelector('.tab-badge');
+    if (openReqs.length) {
+      if (!b) { b = document.createElement('span'); b.className = 'tab-badge'; btn.appendChild(b); }
+      b.textContent = String(openReqs.length);
+    } else if (b) b.remove();
+  }
+  function jumpToDay(date, uid) {
+    hoursStart = (function () {
+      const p = date.split('-');
+      const d = new Date(+p[0], +p[1] - 1, +p[2]);
+      d.setDate(d.getDate() - d.getDay());
+      return d;
+    })();
+    hoursFilterVal = uid ? 'uid:' + uid : 'all';
+    hoursOpenDays = new Set([date]);
+    subscribeHours();
+    renderHours();
+  }
+  function renderAttention(byId) {
+    const box = $('attnBox');
+    box.innerHTML = '';
+    const tk = todayKey();
+    const items = [];
+
+    // Shifts left running on a past day — the #1 payroll mistake
+    hoursClocks.forEach(function (t) {
+      if (t.date >= tk || !(t.sessions || []).some(s => !s.out)) return;
+      const emp = byId[t.uid];
+      items.push({
+        w: (emp ? emp.name : 'Someone') + ' was never clocked out',
+        sub: fmtDateLabel(t.date) + ' · still open since ' + fmtClock((t.sessions.find(s => !s.out) || {}).in || 0),
+        btns: [{ label: 'Fix times', primary: true, fn: function () {
+          openClockEditor(t.uid, t.date, t, emp ? emp.name : '(removed)');
+        } }]
+      });
+    });
+
+    // Open correction requests from employees
+    openReqs.forEach(function (rq) {
+      items.push({
+        w: (rq.name || 'Someone') + ': “' + (rq.message || '') + '”',
+        sub: 'About ' + fmtDateLabel(rq.date),
+        btns: [
+          { label: 'Go to day', primary: true, fn: function () { jumpToDay(rq.date, rq.uid); } },
+          { label: 'Mark fixed ✓', primary: false, fn: function () {
+            db.doc('requests/' + rq.id).update({ status: 'done', resolvedBy: me.email || '', resolvedAt: Date.now() })
+              .then(function () { toast('Marked fixed — ' + (rq.name || 'they') + ' sees it on their My hours tab.'); })
+              .catch(function () { toast('Could not update the request.'); });
+          } }
+        ]
+      });
+    });
+
+    // A finished pay period with unapproved paychecks
+    const pp = payPeriod();
+    if (pp.end < tk) {
+      const agg = {};
+      hoursClocks.forEach(function (t) {
+        if (t.date >= pp.start && t.date <= pp.end) agg[t.uid] = (agg[t.uid] || 0) + docWorkedMs(t);
+      });
+      const un = Object.keys(agg).filter(uid =>
+        agg[uid] > 0 && grossFor(uid, agg[uid]) !== null && !periodApprovals[uid]);
+      if (un.length) {
+        items.push({
+          w: un.length + ' paycheck' + (un.length === 1 ? '' : 's') + ' not approved for the pay period that just ended',
+          sub: 'Check the Paycheck card below and tap Approve on each person.',
+          btns: []
+        });
+      }
+    }
+
+    if (!items.length) return;
+    const card = document.createElement('div');
+    card.className = 'attn';
+    const h = document.createElement('h4');
+    h.textContent = 'Needs attention (' + items.length + ')';
+    card.appendChild(h);
+    items.forEach(function (it) {
+      const row = document.createElement('div');
+      row.className = 'attn-row';
+      const w = document.createElement('span');
+      w.className = 'w';
+      w.innerHTML = '';
+      w.appendChild(document.createTextNode(it.w));
+      const sub = document.createElement('div');
+      sub.className = 'sub';
+      sub.textContent = it.sub;
+      w.appendChild(sub);
+      row.appendChild(w);
+      (it.btns || []).forEach(function (b) {
+        const btn = document.createElement('button');
+        btn.textContent = b.label;
+        if (b.primary) btn.className = 'primary';
+        btn.addEventListener('click', b.fn);
+        row.appendChild(btn);
+      });
+      card.appendChild(row);
+    });
+    box.appendChild(card);
+  }
+
+  // ── CSV downloads ──
+  function csvCell(v) {
+    v = String(v == null ? '' : v);
+    return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+  }
+  function downloadCSV(filename, rows) {
+    const text = rows.map(r => r.map(csvCell).join(',')).join('\r\n');
+    const blob = new Blob(['﻿' + text], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
+    toast('Downloaded ' + filename);
+  }
+  $('exportBtn').addEventListener('click', function () {
+    const r = hoursRange();
+    const byId = {};
+    employees.concat(workers).forEach(e => { byId[e.id] = e; });
+    const rows = [['Date', 'Name', 'Times', 'Break minutes', 'Hours']];
+    hoursClocks
+      .filter(t => t.date >= r.start && t.date <= r.end)
+      .sort((a, b) => a.date.localeCompare(b.date) || ((byId[a.uid] || {}).name || '').localeCompare((byId[b.uid] || {}).name || ''))
+      .forEach(function (t) {
+        rows.push([t.date, (byId[t.uid] || {}).name || '(removed)', docTimesLabel(t),
+          Math.round(docBreakMs(t) / 60000), (docWorkedMs(t) / 3600000).toFixed(2)]);
+      });
+    if (rows.length === 1) { toast('Nothing to export this week.'); return; }
+    downloadCSV('wny-hours-week-' + r.start + '.csv', rows);
+  });
+  function exportPayrollCSV(pp, payUids, periodAgg, byId) {
+    const rows = [['Name', 'Period start', 'Period end', 'Hours', 'Rate', 'Gross',
+      'Federal', 'Social Security', 'Medicare', 'NY State', 'NY SDI', 'NY PFL', 'Total taxes', 'Net']];
+    payUids.forEach(function (uid) {
+      const agg = periodAgg[uid];
+      const weeksWorked = (agg.wk1 > 0 ? 1 : 0) + (agg.wk2 > 0 ? 1 : 0);
+      const chk = calcPaycheck(grossFor(uid, agg.worked), weeksWorked);
+      rows.push([(byId[uid] || {}).name || '(removed)', pp.start, pp.end,
+        (agg.worked / 3600000).toFixed(2), (payrollMap[uid] || {}).rate || 0,
+        chk.gross.toFixed(2), chk.fed.toFixed(2), chk.oasdi.toFixed(2), chk.medicare.toFixed(2),
+        chk.ny.toFixed(2), chk.sdi.toFixed(2), chk.pfl.toFixed(2), chk.taxes.toFixed(2), chk.net.toFixed(2)]);
+    });
+    downloadCSV('wny-payroll-' + pp.start + '.csv', rows);
+  }
+
+  // ── My hours (every employee): own punches, pay, requests ──
+  function subscribeMine() {
+    if (!myStart) {
+      myStart = new Date();
+      myStart.setDate(myStart.getDate() - myStart.getDay());
+    }
+    subscribeMyClocks();
+    unsubMyReqs = db.collection('requests').where('uid', '==', me.uid).onSnapshot(function (s) {
+      myReqs = s.docs.map(d => Object.assign({ id: d.id }, d.data()));
+      renderMy();
+    }, function () { /* not fatal */ });
+    unsubMyApprovals = db.collection('approvals').where('uid', '==', me.uid).onSnapshot(function (s) {
+      myApprovals = {};
+      s.forEach(function (d) { const x = d.data(); myApprovals[x.period] = x; });
+      renderMy();
+    }, function () { /* not fatal */ });
+    unsubMyCrews = db.collection('crews').where('date', '==', todayKey()).onSnapshot(function (s) {
+      myCrewsToday = s.docs.map(d => Object.assign({ id: d.id }, d.data()));
+      renderMy();
+    }, function () { /* not fatal */ });
+    unsubMyRate = db.doc('payroll/' + me.uid).onSnapshot(function (s) {
+      myRate = s.exists ? s.data() : null;
+      renderMy();
+    }, function () { /* not fatal */ });
+  }
+  function subscribeMyClocks() {
+    if (unsubMyClocks) unsubMyClocks();
+    const pp = periodOf(myStart);
+    unsubMyClocks = db.collection('timeclock')
+      .where('uid', '==', me.uid)
+      .where('date', '>=', pp.start)
+      .where('date', '<=', pp.end)
+      .onSnapshot(function (s) {
+        myClocks = s.docs.map(d => d.data());
+        renderMy();
+      }, function () { toast('Could not load your hours.'); });
+  }
+  function shiftMyPeriod(days) {
+    myStart.setDate(myStart.getDate() + days);
+    subscribeMyClocks();
+    renderMy();
+  }
+  $('myPrevBtn').addEventListener('click', function () { shiftMyPeriod(-14); });
+  $('myNextBtn').addEventListener('click', function () { shiftMyPeriod(14); });
+  $('myTodayBtn').addEventListener('click', function () {
+    myStart = new Date();
+    myStart.setDate(myStart.getDate() - myStart.getDay());
+    subscribeMyClocks();
+    renderMy();
+  });
+
+  function selfDo(btn, fn, doneMsg) {
+    if (selfBusy) return;
+    selfBusy = true;
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+    fn(me.uid, todayKey()).then(function (ok) {
+      selfBusy = false;
+      if (ok) toast(doneMsg + ' ' + fmtClock(Date.now()));
+      renderMy(); // listener also re-renders once the write lands
+    });
+  }
+
+  let myPayOpen = false;
+  function renderMy() {
+    if (!me || isAdmin || activeTab !== 'my') return;
+    const pp = periodOf(myStart);
+    const fmtShort = k => { const q = k.split('-'); return +q[1] + '/' + +q[2]; };
+    $('myPeriodLabel').textContent = fmtShort(pp.start) + ' – ' + fmtShort(pp.end);
+
+    const tk = todayKey();
+    const isCurrent = tk >= pp.start && tk <= pp.end;
+
+    // Today card: state, worked time, big punch buttons when enabled
+    const st = $('myStatus');
+    st.innerHTML = '';
+    if (isCurrent) {
+      const todayDoc = myClocks.find(t => t.date === tk) || null;
+      const card = document.createElement('div');
+      card.className = 'my-status';
+      const open = !!(todayDoc && (todayDoc.sessions || []).some(s => !s.out));
+      const brk = !!(todayDoc && todayDoc.onBreak === true);
+      const worked = todayDoc ? docWorkedMs(todayDoc) : 0;
+      const state = document.createElement('div');
+      state.className = 'st-state' + (brk ? ' brk' : (open ? ' live' : ''));
+      state.textContent = brk ? '⏸ On break' : (open ? '● On the clock' : (worked > 0 ? 'Clocked out' : 'Not clocked in today'));
+      card.appendChild(state);
+      const big = document.createElement('div');
+      big.className = 'st-big';
+      big.textContent = fmtDur(worked);
+      card.appendChild(big);
+      const sub = document.createElement('div');
+      sub.className = 'st-sub';
+      const lines = [];
+      if (todayDoc && (todayDoc.sessions || []).length) {
+        const brkMs = docBreakMs(todayDoc);
+        lines.push('Today: ' + docTimesLabel(todayDoc) + (brkMs > 0 ? ' · break ' + fmtDur(brkMs) : ''));
+      } else {
+        lines.push('No punches yet today.');
+      }
+      const myCrew = myCrewsToday.find(c => c.ended !== true && (c.members || []).includes(me.uid));
+      if (myCrew) lines.push('You’re on ' + (myCrew.name || 'a crew') + ' today.');
+      sub.innerHTML = lines.join('<br>');
+      card.appendChild(sub);
+
+      const dayClosed = myCrewsToday.some(c => c.ended === true);
+      if (pubSettings && pubSettings.selfClock === true) {
+        if (dayClosed) {
+          const n = document.createElement('div');
+          n.className = 'st-sub';
+          n.style.marginTop = '12px';
+          n.textContent = 'A manager ended the day — the clock is closed until tomorrow.';
+          card.appendChild(n);
+        } else {
+          const act = document.createElement('div');
+          act.className = 'self-actions';
+          function addBtn(label, primary, fn, doneMsg) {
+            const b = document.createElement('button');
+            b.textContent = label;
+            if (primary) b.className = 'primary';
+            b.disabled = selfBusy;
+            b.addEventListener('click', function () { selfDo(b, fn, doneMsg); });
+            act.appendChild(b);
+          }
+          if (brk) {
+            addBtn('End break', true, endBreak, 'Break ended ✓');
+            addBtn('Clock out', false, clockOut, 'Clocked out ✓');
+          } else if (open) {
+            addBtn('Take a break', false, startBreak, 'On break ✓');
+            addBtn('Clock out', true, clockOut, 'Clocked out ✓');
+          } else {
+            addBtn(worked > 0 ? 'Clock back in' : 'Clock in', true, clockIn, 'Clocked in ✓');
+          }
+          card.appendChild(act);
+        }
+      }
+      st.appendChild(card);
+    }
+
+    // Period summary: week totals + estimated paycheck
+    const sum = $('mySummary');
+    sum.innerHTML = '';
+    let wk1 = 0, wk2 = 0, brkTot = 0, daysWorked = 0;
+    myClocks.forEach(function (t) {
+      const w = docWorkedMs(t);
+      if (w > 0) daysWorked++;
+      brkTot += docBreakMs(t);
+      if (t.date < pp.mid) wk1 += w; else wk2 += w;
+    });
+    const total = wk1 + wk2;
+    const card2 = document.createElement('div');
+    card2.className = 'hrs-summary';
+    const h = document.createElement('h4');
+    h.textContent = 'Pay period total';
+    if (myApprovals[pp.start]) {
+      const tag = document.createElement('span');
+      tag.className = 'ok-tag';
+      tag.textContent = ' · Approved ✓';
+      tag.title = 'Your manager approved this paycheck.';
+      h.appendChild(tag);
+    }
+    card2.appendChild(h);
+    [['Week 1 (' + fmtShort(pp.start) + '–)', wk1], ['Week 2 (' + fmtShort(pp.mid) + '–)', wk2]].forEach(function (pair) {
+      const rowS = document.createElement('div');
+      rowS.className = 'hrs-sumrow';
+      const n = document.createElement('span');
+      n.className = 'n';
+      n.textContent = pair[0];
+      rowS.appendChild(n);
+      const t = document.createElement('span');
+      t.className = 't';
+      t.textContent = fmtDur(pair[1]);
+      rowS.appendChild(t);
+      card2.appendChild(rowS);
+    });
+    const grand = document.createElement('div');
+    grand.className = 'hrs-grand';
+    const lbl = document.createElement('span');
+    lbl.className = 'lbl';
+    lbl.textContent = daysWorked + ' day' + (daysWorked === 1 ? '' : 's') + (brkTot > 0 ? ' · breaks ' + fmtDur(brkTot) : '');
+    grand.appendChild(lbl);
+    const amt = document.createElement('span');
+    amt.textContent = fmtDur(total);
+    grand.appendChild(amt);
+    card2.appendChild(grand);
+
+    if (myRate && myRate.rate > 0 && total > 0) {
+      const weeksWorked = (wk1 > 0 ? 1 : 0) + (wk2 > 0 ? 1 : 0);
+      const chk = calcPaycheck((total / 3600000) * myRate.rate, weeksWorked);
+      const payRow = document.createElement('div');
+      payRow.className = 'hrs-grand';
+      payRow.style.cursor = 'pointer';
+      payRow.title = 'Tap for the tax breakdown';
+      const pl = document.createElement('span');
+      pl.className = 'lbl';
+      pl.textContent = 'Estimated paycheck';
+      payRow.appendChild(pl);
+      const pa = document.createElement('span');
+      pa.innerHTML = fmtMoney(chk.gross) + ' gross · <span class="net">' + fmtMoney(chk.net) + ' take-home</span>';
+      payRow.appendChild(pa);
+      payRow.addEventListener('click', function () { myPayOpen = !myPayOpen; renderMy(); });
+      card2.appendChild(payRow);
+      if (myPayOpen) {
+        const det = document.createElement('div');
+        det.className = 'hrs-taxnote';
+        det.style.cssText = 'font-size:11px;color:var(--text-dim);line-height:1.7;margin-top:6px';
+        det.innerHTML = 'Federal ' + fmtMoney(chk.fed) + ' · Social Security ' + fmtMoney(chk.oasdi)
+          + ' · Medicare ' + fmtMoney(chk.medicare) + '<br>NY State ' + fmtMoney(chk.ny)
+          + ' · NY SDI ' + fmtMoney(chk.sdi) + ' · NYS Paid Family Leave ' + fmtMoney(chk.pfl)
+          + '<br>Total taxes ' + fmtMoney(chk.taxes);
+        card2.appendChild(det);
+      }
+      const noteT = document.createElement('div');
+      noteT.className = 'hrs-taxnote';
+      noteT.textContent = 'Estimate — withheld the same way as the company paychecks. Your real check can differ slightly.';
+      card2.appendChild(noteT);
+    }
+    sum.appendChild(card2);
+
+    // Day-by-day list with a "something wrong?" flag on each day
+    const list = $('myList');
+    list.innerHTML = '';
+    const reqByDate = {};
+    myReqs.forEach(function (rq) { (reqByDate[rq.date] = reqByDate[rq.date] || []).push(rq); });
+    const dates = [...new Set(myClocks.map(t => t.date))].sort().reverse();
+    if (!dates.length) {
+      const em = document.createElement('div');
+      em.className = 'hrs-empty';
+      em.textContent = 'No hours recorded in this pay period' + (isCurrent ? ' yet' : '') + '.';
+      list.appendChild(em);
+      return;
+    }
+    const byDate = {};
+    myClocks.forEach(function (t) { byDate[t.date] = t; });
+    const wrap = document.createElement('div');
+    wrap.className = 'hrs-summary';
+    const h2 = document.createElement('h4');
+    h2.textContent = 'Day by day';
+    wrap.appendChild(h2);
+    dates.forEach(function (date) {
+      const t = byDate[date];
+      const row = document.createElement('div');
+      row.className = 'my-dayrow';
+      const p = date.split('-');
+      const dObj = new Date(+p[0], +p[1] - 1, +p[2]);
+      const d = document.createElement('span');
+      d.className = 'd';
+      d.textContent = DOW[dObj.getDay()] + ' ' + (+p[1]) + '/' + (+p[2]);
+      row.appendChild(d);
+      const times = document.createElement('span');
+      times.className = 'times';
+      const brkMs = docBreakMs(t);
+      times.textContent = docTimesLabel(t) + (brkMs > 0 ? ' · break ' + fmtDur(brkMs) : '');
+      row.appendChild(times);
+      const wt = document.createElement('span');
+      wt.className = 'wt';
+      wt.textContent = fmtDur(docWorkedMs(t));
+      row.appendChild(wt);
+      const flag = document.createElement('button');
+      flag.type = 'button';
+      flag.className = 'flag';
+      flag.textContent = '⚑';
+      flag.title = 'Something wrong with this day? Tell your manager.';
+      flag.setAttribute('aria-label', 'Report a problem with ' + DOW[dObj.getDay()] + ' ' + (+p[1]) + '/' + (+p[2]));
+      flag.addEventListener('click', function () { openReqModal(date, docTimesLabel(t)); });
+      row.appendChild(flag);
+      wrap.appendChild(row);
+      (reqByDate[date] || []).forEach(function (rq) {
+        const chip = document.createElement('div');
+        chip.className = 'req-chip' + (rq.status === 'done' ? ' done' : '');
+        chip.textContent = rq.status === 'done' ? 'Fixed ✓' : 'Sent to manager — “' + (rq.message || '').slice(0, 60) + '”';
+        wrap.appendChild(chip);
+      });
+    });
+    list.appendChild(wrap);
+  }
+
+  // Report-a-problem modal
+  let reqTarget = null;
+  function openReqModal(date, timesLabel) {
+    reqTarget = { date: date };
+    $('reqSub').textContent = fmtDateLabel(date) + ' — recorded: ' + (timesLabel || 'nothing')
+      + '. Say what should change; your manager can fix it.';
+    $('reqText').value = '';
+    $('reqMsg').textContent = '';
+    $('reqModal').classList.add('open');
+    $('modalOverlay').classList.add('open');
+    $('reqText').focus();
+  }
+  $('reqCancel').addEventListener('click', closeModal);
+  $('reqSend').addEventListener('click', function () {
+    const msg = $('reqText').value.trim();
+    if (!msg) { $('reqMsg').textContent = 'Say what’s wrong first.'; return; }
+    if (!reqTarget) return;
+    const myEmp = employees.find(e => e.id === me.uid);
+    $('reqSend').disabled = true;
+    db.collection('requests').add({
+      uid: me.uid,
+      name: (myEmp && myEmp.name) || me.email || '',
+      date: reqTarget.date,
+      message: msg,
+      status: 'open',
+      created: Date.now()
+    }).then(function () {
+      $('reqSend').disabled = false;
+      closeModal();
+      toast('Sent — your manager will take a look.');
+    }).catch(function () {
+      $('reqSend').disabled = false;
+      $('reqMsg').textContent = 'Could not send — try again.';
+    });
+  });
+
+  // Keep running timers fresh while a live tab is open
   setInterval(function () {
-    if (!isAdmin) return;
-    if (activeTab === 'crews') renderCrews();
-    if (activeTab === 'hours') renderHours();
+    if (isAdmin) {
+      if (activeTab === 'crews') renderCrews();
+      if (activeTab === 'hours') renderHours();
+    } else if (activeTab === 'my') {
+      renderMy();
+    }
   }, 30000);
 
   document.addEventListener('click', function () {
@@ -2894,6 +3572,7 @@
 
     renderCrews(); // keep the admin tabs in sync with roster/availability changes
     renderHours();
+    renderMy();
   }
 
   // ── PWA ──

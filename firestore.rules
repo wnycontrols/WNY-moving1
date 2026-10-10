@@ -8,6 +8,9 @@ service cloud.firestore {
     function companySettings() {
       return get(/databases/$(database)/documents/settings/company).data;
     }
+    function publicSettings() {
+      return get(/databases/$(database)/documents/settings/public).data;
+    }
     function isAdmin() {
       return signedIn() && request.auth.token.email in companySettings().adminEmails;
     }
@@ -21,7 +24,8 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
-    // Non-secret shared settings (e.g. minimum crew per day). Team can read.
+    // Non-secret shared settings (e.g. minimum crew per day, pay-period anchor,
+    // whether employees may clock in from their own phones). Team can read.
     match /settings/public {
       allow read: if isEmployee() || isAdmin();
       allow write: if isAdmin();
@@ -54,20 +58,70 @@ service cloud.firestore {
       allow delete: if isAdmin() || (isEmployee() && resource.data.uid == request.auth.uid);
     }
 
-    // Daily crew assignments and the time clock: admin-only.
+    // Daily crew assignments: the team can see who is on which crew
+    // (so "My hours" can show your crew); only admins change them.
     match /crews/{id} {
-      allow read, write: if isAdmin();
+      allow read: if isEmployee() || isAdmin();
+      allow write: if isAdmin();
     }
+
+    // Time clock, one document per person per day (id: "{uid}_{date}").
+    // Everyone can read THEIR OWN punches. Admins read and write everything.
+    // Employees may write their own TODAY document only when the admin has
+    // turned on phone clock-in (settings/public.selfClock), and only with
+    // the expected fields — never anyone else's record.
     match /timeclock/{id} {
-      allow read, write: if isAdmin();
+      allow read: if isAdmin()
+        || (isEmployee()
+            && ((resource != null && resource.data.uid == request.auth.uid)
+                || id.split('_')[0] == request.auth.uid));
+      allow create, update: if isAdmin()
+        || (isEmployee()
+            && publicSettings().selfClock == true
+            && request.resource.data.uid == request.auth.uid
+            && id == request.auth.uid + '_' + request.resource.data.date
+            && request.resource.data.date is string
+            && request.resource.data.sessions is list
+            && request.resource.data.keys().hasOnly(['uid', 'date', 'sessions', 'onBreak', 'breakStart', 'breakMs']));
+      allow delete: if isAdmin();
     }
-    // Clock-only workers (no sign-up/account): admin-only.
+
+    // Clock-only workers (no sign-up/account): team can read names so crew
+    // lists render; only admins manage them.
     match /workers/{id} {
-      allow read, write: if isAdmin();
+      allow read: if isEmployee() || isAdmin();
+      allow write: if isAdmin();
     }
-    // Pay rates and tax estimates: admin-only (never visible to employees).
+
+    // Pay rates: each person can read ONLY their own rate document (so
+    // "My hours" can estimate their paycheck). The kiosk PIN and tag
+    // mappings live under ids that never equal an auth uid, so they stay
+    // admin-only. All writes are admin-only.
     match /payroll/{id} {
-      allow read, write: if isAdmin();
+      allow read: if isAdmin() || (isEmployee() && request.auth.uid == id);
+      allow write: if isAdmin();
+    }
+
+    // Correction requests ("my Tuesday looks wrong"). Employees create
+    // their own and watch their status; admins resolve them.
+    match /requests/{id} {
+      allow read: if isAdmin() || (isEmployee() && resource.data.uid == request.auth.uid);
+      allow create: if isEmployee()
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.status == 'open'
+        && request.resource.data.date is string
+        && request.resource.data.message is string
+        && request.resource.data.message.size() > 0
+        && request.resource.data.message.size() <= 500;
+      allow update, delete: if isAdmin();
+    }
+
+    // Pay-period approvals, one document per person per period
+    // (id: "{uid}_{periodStart}"). Admins approve; each person can see
+    // their own "Approved" tag.
+    match /approvals/{id} {
+      allow read: if isAdmin() || (isEmployee() && resource.data.uid == request.auth.uid);
+      allow write: if isAdmin();
     }
 
     match /{document=**} {

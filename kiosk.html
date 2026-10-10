@@ -276,9 +276,17 @@
   let payAnchor = '2026-01-04'; // pay periods count in 2-week steps from this Sunday
   let unsubs = [];
 
+  // "Today" is pinned to the company's time zone, so a Pi with a wrong clock
+  // setting can never punch into the wrong day's record.
   function todayKey() {
-    const t = new Date();
-    return t.getFullYear() + '-' + String(t.getMonth() + 1).padStart(2, '0') + '-' + String(t.getDate()).padStart(2, '0');
+    try {
+      return new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit'
+      }).format(new Date());
+    } catch (e) {
+      const t = new Date();
+      return t.getFullYear() + '-' + String(t.getMonth() + 1).padStart(2, '0') + '-' + String(t.getDate()).padStart(2, '0');
+    }
   }
   function initials(name) { return (name || '?').trim().split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase(); }
   function contrastText(hex) {
