@@ -626,6 +626,7 @@
     </div>
     <div class="header-actions">
       <span class="who" id="whoami"></span>
+      <button class="ghost" id="kioskBtn" style="display:none" title="Open the punch-clock kiosk">Kiosk</button>
       <button class="ghost" id="settingsBtn" style="display:none" title="Admin settings">&#9881;</button>
       <button class="ghost" id="signoutBtn" title="Sign out">Sign out</button>
     </div>
@@ -1024,6 +1025,7 @@
     show('appView');
     $('whoami').textContent = (me.email || '') + (isAdmin ? ' · admin' : '');
     $('settingsBtn').style.display = isAdmin ? '' : 'none';
+    $('kioskBtn').style.display = isAdmin ? '' : 'none';
     $('mainTabs').style.display = isAdmin ? '' : 'none';
     if (isAdmin) {
       if (!crewDate) crewDate = todayKey();
@@ -1187,6 +1189,7 @@
   });
   $('profileSignout').addEventListener('click', function () { auth.signOut(); });
   $('signoutBtn').addEventListener('click', function () { auth.signOut(); });
+  $('kioskBtn').addEventListener('click', function () { window.location.href = 'kiosk.html'; });
 
   // ── Admin settings modal ──
   $('settingsBtn').addEventListener('click', function () {
