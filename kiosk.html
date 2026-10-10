@@ -236,7 +236,18 @@
   const DOW = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
   const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
-  if (!window.FIREBASE_CONFIG || /PASTE/i.test(window.FIREBASE_CONFIG.apiKey || '')) {
+  // No internet yet (boot race, Wi-Fi drop): show a message and keep
+  // retrying — the kiosk must never sit on a dead white screen.
+  if (typeof firebase === 'undefined' || !window.FIREBASE_CONFIG) {
+    document.body.innerHTML =
+      '<div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:20px">' +
+      '<div style="border:3px solid #fff;width:64px;height:64px;display:flex;align-items:center;justify-content:center;font-weight:800;letter-spacing:2px;margin-bottom:24px">WNY</div>' +
+      '<div style="font-size:24px;font-weight:800">Connecting…</div>' +
+      '<div style="font-size:14px;color:#9a9a9a;margin-top:10px">Waiting for the internet. This screen retries by itself.</div></div>';
+    setTimeout(function () { location.reload(); }, 6000);
+    return;
+  }
+  if (/PASTE/i.test(window.FIREBASE_CONFIG.apiKey || '')) {
     document.body.innerHTML = '<div style="padding:40px;font-size:18px">firebase-config.js is not set up.</div>';
     return;
   }

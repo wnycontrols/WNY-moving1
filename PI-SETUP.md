@@ -43,30 +43,36 @@ https://wnycontrols.github.io/WNY-moving1/kiosk.html
 
 ## 3. Launch the kiosk automatically
 
-Open a terminal on the Pi:
+This method works on every Raspberry Pi OS desktop (old X11 and new Wayland
+alike). First, in `sudo raspi-config`:
+
+- **System Options → Boot / Auto Login → Desktop Autologin**
+- **Display Options → Screen Blanking → No**
+
+Then paste this whole block into a terminal:
 
 ```bash
-mkdir -p ~/.config/lxsession/LXDE-pi
-nano ~/.config/lxsession/LXDE-pi/autostart
+mkdir -p ~/.config/autostart
+cat > ~/.config/autostart/wny-kiosk.desktop << 'EOF'
+[Desktop Entry]
+Type=Application
+Name=WNY Kiosk
+Exec=sh -c "for i in $(seq 1 30); do wget -q --spider https://wnycontrols.github.io/WNY-moving1/kiosk.html && break; sleep 2; done; chromium-browser --kiosk --password-store=basic --touch-events=enabled --noerrdialogs --disable-restore-session-state https://wnycontrols.github.io/WNY-moving1/kiosk.html || chromium --kiosk --password-store=basic --touch-events=enabled --noerrdialogs --disable-restore-session-state https://wnycontrols.github.io/WNY-moving1/kiosk.html"
+X-GNOME-Autostart-enabled=true
+EOF
+rm -f ~/.local/share/keyrings/*.keyring
 ```
 
-Put exactly this in the file (Ctrl+O, Enter, Ctrl+X to save):
+What the pieces do: the `wget` loop waits (up to a minute) for Wi-Fi before
+opening the browser; `--password-store=basic` plus the keyring removal stops
+the "unlock your login keyring" prompt; the `||` tries both browser command
+names so it works on any OS version. The kiosk page itself also shows
+"Connecting…" and retries automatically if the internet isn't up yet, so it
+can never strand on a white screen.
 
-```
-@lxpanel --profile LXDE-pi
-@pcmanfm --desktop --profile LXDE-pi
-@xset s off
-@xset -dpms
-@xset s noblank
-@chromium-browser --kiosk --noerrdialogs --disable-restore-session-state --check-for-update-interval=604800 https://wnycontrols.github.io/WNY-moving1/kiosk.html
-```
-
-Reboot (`sudo reboot`). The Pi boots straight into the fullscreen clock.
-Sign in with the kiosk login once — it stays signed in after reboots.
-
-> Newer Raspberry Pi OS ("Bookworm" on Wayland): if the autostart file has no
-> effect, instead run `sudo raspi-config` → Advanced → Wayland → select X11,
-> reboot, and the instructions above apply.
+Reboot (`sudo reboot`). The Pi boots to the desktop for a few seconds, then
+the kiosk takes over fullscreen. Sign in with the kiosk login once — it stays
+signed in after reboots.
 
 ## 4. Daily use
 
