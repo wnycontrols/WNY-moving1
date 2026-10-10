@@ -88,7 +88,10 @@
 
   /* ── My hours ── */
   #hoursView { justify-content: flex-start; padding-top: 18px; overflow-y: auto; }
-  #hoursPeriod { font-size: 16px; letter-spacing: 2px; text-transform: uppercase; color: var(--text-dim); margin: 8px 0 12px; }
+  #hoursPeriod { font-size: 16px; letter-spacing: 2px; text-transform: uppercase; color: var(--text-dim); min-width: 290px; text-align: center; }
+  .pnav { display: flex; align-items: center; gap: 10px; margin: 8px 0 12px; }
+  .pnav button { min-width: 58px; min-height: 52px; font-size: 26px; font-weight: 800; }
+  .pnav button[disabled] { opacity: 0; pointer-events: none; }
   #hoursDays { width: 100%; max-width: 700px; text-align: left; }
   .hday {
     display: flex; align-items: baseline; gap: 12px;
@@ -181,7 +184,7 @@
 
 <div class="screen" id="hoursView">
   <div class="who" style="margin-bottom:2px"><span id="hoursInit"></span><span id="hoursName" style="font-size:34px;font-weight:800"></span></div>
-  <div id="hoursPeriod"></div>
+  <div class="pnav"><button id="ppPrev">&#8249;</button><div id="hoursPeriod"></div><button id="ppNext">&#8250;</button></div>
   <div id="hoursDays"></div>
   <div id="hoursTotals"></div>
   <button id="hoursBack">Done</button>
@@ -533,7 +536,26 @@
     const brk = (t.breakMs || 0) + (live && t.onBreak && t.breakStart ? Date.now() - t.breakStart : 0);
     return Math.max(0, onClock - brk);
   }
+  let hoursUid = null, hoursOffset = 0; // 0 = current period, -1 = previous, …
+
+  function payPeriodAt(offset) {
+    const base = payPeriod();
+    const start = new Date(base.startD);
+    start.setDate(start.getDate() + offset * 14);
+    const mid = new Date(start); mid.setDate(mid.getDate() + 7);
+    const end = new Date(start); end.setDate(end.getDate() + 13);
+    const key = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    return { start: key(start), mid: key(mid), end: key(end), startD: start, endD: end };
+  }
+
   function showMyHours(uid) {
+    hoursUid = uid;
+    hoursOffset = 0;
+    loadMyHours();
+  }
+
+  function loadMyHours() {
+    const uid = hoursUid;
     const p = people[uid];
     if (!p) return;
     clearTimeout(personTimer);
@@ -542,9 +564,11 @@
     $('hoursInit').style.background = p.color;
     $('hoursInit').style.color = contrastText(p.color);
     $('hoursName').textContent = p.name;
-    const pp = payPeriod();
+    $('ppNext').disabled = hoursOffset >= 0;
+    const pp = payPeriodAt(hoursOffset);
     const fmtShort = d => (d.getMonth() + 1) + '/' + d.getDate();
-    $('hoursPeriod').textContent = 'Pay period ' + fmtShort(pp.startD) + ' – ' + fmtShort(pp.endD);
+    $('hoursPeriod').textContent = 'Pay period ' + fmtShort(pp.startD) + ' – ' + fmtShort(pp.endD)
+      + (hoursOffset === 0 ? '' : hoursOffset === -1 ? ' · previous' : '');
     $('hoursDays').innerHTML = '<div class="hempty">Loading…</div>';
     $('hoursTotals').textContent = '';
     show('hoursView');
@@ -557,7 +581,7 @@
         const wrap = $('hoursDays');
         wrap.innerHTML = '';
         if (!mine.length) {
-          wrap.innerHTML = '<div class="hempty">No hours recorded this pay period yet.</div>';
+          wrap.innerHTML = '<div class="hempty">No hours recorded in this pay period.</div>';
           return;
         }
         let wk1 = 0, wk2 = 0, wk1Shown = false;
@@ -596,6 +620,8 @@
       });
   }
   $('myHoursBtn').addEventListener('click', function () { if (currentUid) showMyHours(currentUid); });
+  $('ppPrev').addEventListener('click', function () { hoursOffset--; loadMyHours(); });
+  $('ppNext').addEventListener('click', function () { if (hoursOffset < 0) { hoursOffset++; loadMyHours(); } });
   $('hoursBack').addEventListener('click', goIdle);
 
   function renderPerson() {
