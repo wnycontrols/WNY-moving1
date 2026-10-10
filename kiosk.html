@@ -13,6 +13,7 @@
     --green: #69f0ae; --amber: #ffd600; --danger: #ff5252;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; user-select: none; }
+  body:not(.has-mouse), body:not(.has-mouse) * { cursor: none !important; }
   html, body { height: 100%; overflow: hidden; }
   body {
     background: var(--bg); color: var(--text);
@@ -785,6 +786,16 @@
     openPin(function () { show('adminView'); renderAdmin(); });
   });
   $('openAppBtn').addEventListener('click', function () { window.location.href = 'index.html'; });
+
+  // Show the pointer only while a real mouse is being used; touch taps
+  // never summon it, and 15s without mouse movement hides it again.
+  let mouseTimer = null;
+  document.addEventListener('pointermove', function (e) {
+    if (e.pointerType !== 'mouse') return;
+    document.body.classList.add('has-mouse');
+    clearTimeout(mouseTimer);
+    mouseTimer = setTimeout(function () { document.body.classList.remove('has-mouse'); }, 15000);
+  }, true);
 
   document.addEventListener('contextmenu', e => e.preventDefault());
 })();
